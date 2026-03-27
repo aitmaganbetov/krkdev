@@ -1,10 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
 from sqlalchemy import inspect, text
 import models  # noqa: F401 — ensures models are registered before create_all
 from routers import auth_router, catalogs_router, records_router, system_settings_router, users_router
 from migrations import import_faculties
+from services import require_roles, ROLE_ADMIN
 
 Base.metadata.create_all(bind=engine)
 
@@ -46,6 +47,6 @@ def health():
     return {"status": "ok"}
 
 @app.post("/admin/migrate/faculties")
-def migrate_faculties():
+def migrate_faculties(_: dict = Depends(require_roles(ROLE_ADMIN))):
     """Admin endpoint to import faculties from remote database"""
     return import_faculties()

@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, Query
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -110,14 +112,12 @@ def get_record(
 ):
     record = record_service.get_record_by_id(db, record_id)
     if current_user["role"] == ROLE_STAFF and not _is_owner(record.submitted_by, current_user["username"]):
-        from fastapi import HTTPException, status
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ только к своим записям")
     if (
         current_user["role"] == ROLE_INSPECTOR
         and record.status == "draft"
         and not _is_owner(record.submitted_by, current_user["username"])
     ):
-        from fastapi import HTTPException, status
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inspector cannot access draft records of other users")
     return record
 
@@ -152,17 +152,14 @@ def submit_record(
     current_user: dict[str, str] = Depends(require_roles(ROLE_STAFF)),
 ):
     """Staff submits their record"""
-    from datetime import datetime
     record = record_service.get_record_by_id(db, record_id)
     
     # Only owner can submit (if already assigned) or self-submit (if not assigned)
     if record.submitted_by and not _is_owner(record.submitted_by, current_user["username"]):
-        from fastapi import HTTPException, status
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Can only submit your own records")
     
     # Only draft or rework records can be submitted
     if record.status not in ["draft", "rework"]:
-        from fastapi import HTTPException, status
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only draft or rework records can be submitted")
     
     # Set submitted_by on first submission
@@ -183,12 +180,10 @@ def send_to_rework(
     current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
 ):
     """Admin/Inspector sends record back to rework"""
-    from datetime import datetime
     record = record_service.get_record_by_id(db, record_id)
     
     # Can only send submitted records to rework
     if record.status != "submitted":
-        from fastapi import HTTPException, status
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only submitted records can be sent to rework")
     
     record.status = "rework"
@@ -206,12 +201,10 @@ def accept_record(
     current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
 ):
     """Admin/Inspector accepts record"""
-    from datetime import datetime
     record = record_service.get_record_by_id(db, record_id)
     
     # Can only accept submitted or rework records
     if record.status not in ["submitted", "rework"]:
-        from fastapi import HTTPException, status
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only submitted or rework records can be accepted")
     
     record.status = "accepted"

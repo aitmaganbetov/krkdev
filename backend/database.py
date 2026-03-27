@@ -7,6 +7,13 @@ from urllib.parse import quote_plus
 load_dotenv()
 
 
+def _require_env(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise RuntimeError(f"Environment variable {name} is required")
+    return value
+
+
 def _build_database_url() -> str:
     db_user = os.getenv("DB_USER")
     db_password = os.getenv("DB_PASSWORD")
@@ -18,7 +25,13 @@ def _build_database_url() -> str:
         safe_password = quote_plus(db_password)
         return f"mysql+pymysql://{db_user}:{safe_password}@{db_host}:{db_port}/{db_name}"
 
-    return os.getenv("DATABASE_URL", "mysql+pymysql://root:password@localhost:3306/krk_monitoring")
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    if database_url:
+        return database_url
+
+    raise RuntimeError(
+        "Database configuration is missing. Set DATABASE_URL or DB_USER/DB_PASSWORD/DB_HOST/DB_PORT/DB_NAME."
+    )
 
 
 DATABASE_URL = _build_database_url()

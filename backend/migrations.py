@@ -7,19 +7,27 @@ import os
 from sqlalchemy import text
 from database import engine
 
-REMOTE_CONFIG = {
-    'host': os.getenv('READONLY_DB_HOST', 'host.docker.internal'),
-    'port': int(os.getenv('READONLY_DB_PORT', '6080')),
-    'user': os.getenv('READONLY_DB_USER', 'readonly_platon'),
-    'password': os.getenv('READONLY_DB_PASSWORD', 'KazUTB2023@'),
-    'database': os.getenv('READONLY_DB_NAME', 'nitro')
-}
+def _require_env(name: str) -> str:
+    value = os.getenv(name, '').strip()
+    if not value:
+        raise RuntimeError(f'{name} is required for remote import')
+    return value
+
+
+def get_remote_config() -> Dict:
+    return {
+        'host': os.getenv('READONLY_DB_HOST', 'host.docker.internal'),
+        'port': int(os.getenv('READONLY_DB_PORT', '6080')),
+        'user': _require_env('READONLY_DB_USER'),
+        'password': _require_env('READONLY_DB_PASSWORD'),
+        'database': os.getenv('READONLY_DB_NAME', 'nitro')
+    }
 
 def import_faculties() -> Dict:
     """Import faculties from remote to local database"""
     try:
         # Connect to remote database
-        remote_conn = pymysql.connect(**REMOTE_CONFIG, connect_timeout=5)
+        remote_conn = pymysql.connect(**get_remote_config(), connect_timeout=5)
         remote_cursor = remote_conn.cursor(pymysql.cursors.DictCursor)
         
         # Fetch data

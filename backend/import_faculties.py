@@ -6,21 +6,28 @@ import pymysql
 from urllib.parse import quote_plus
 import os
 
+
+def _require_env(name: str) -> str:
+    value = os.getenv(name, '').strip()
+    if not value:
+        raise RuntimeError(f'{name} is required')
+    return value
+
 # Remote database config
 REMOTE_CONFIG = {
-    'host': 'host.docker.internal',
-    'port': 6080,
-    'user': 'readonly_platon',
-    'password': 'KazUTB2023@',
-    'database': 'nitro'
+    'host': os.getenv('READONLY_DB_HOST', 'host.docker.internal'),
+    'port': int(os.getenv('READONLY_DB_PORT', '6080')),
+    'user': _require_env('READONLY_DB_USER'),
+    'password': _require_env('READONLY_DB_PASSWORD'),
+    'database': os.getenv('READONLY_DB_NAME', 'nitro')
 }
 
 # Local database config from env
 LOCAL_CONFIG = {
     'host': os.getenv('DB_HOST', 'db'),
     'port': int(os.getenv('DB_PORT', '3306')),
-    'user': os.getenv('DB_USER', 'root'),
-    'password': os.getenv('DB_PASSWORD', 'password'),
+    'user': _require_env('DB_USER'),
+    'password': _require_env('DB_PASSWORD'),
     'database': os.getenv('DB_NAME', 'krk_monitoring')
 }
 

@@ -8,6 +8,7 @@ faculties -> cafedras -> profession_cafedra -> specializations -> groups
 Run this script directly on the host machine.
 """
 
+import os
 import sys
 
 try:
@@ -19,20 +20,27 @@ except ImportError:
     sys.exit(1)
 
 
+def _require_env(name):
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise RuntimeError(f"Environment variable {name} is required")
+    return value
+
+
 REMOTE_CONFIG = {
-    "host": "127.0.0.1",
-    "port": 6080,
-    "user": "readonly_platon",
-    "password": "KazUTB2023@",
-    "database": "nitro",
+    "host": os.getenv("READONLY_DB_HOST", "127.0.0.1"),
+    "port": int(os.getenv("READONLY_DB_PORT", "6080")),
+    "user": _require_env("READONLY_DB_USER"),
+    "password": _require_env("READONLY_DB_PASSWORD"),
+    "database": os.getenv("READONLY_DB_NAME", "nitro"),
 }
 
 LOCAL_CONFIG = {
-    "host": "localhost",
-    "port": 3307,
-    "user": "root",
-    "password": "password",
-    "database": "krk_monitoring",
+    "host": os.getenv("LOCAL_DB_HOST", "localhost"),
+    "port": int(os.getenv("LOCAL_DB_PORT", "3307")),
+    "user": _require_env("LOCAL_DB_USER"),
+    "password": _require_env("LOCAL_DB_PASSWORD"),
+    "database": os.getenv("LOCAL_DB_NAME", "krk_monitoring"),
 }
 
 

@@ -1,10 +1,12 @@
 import { Outlet, Navigate } from 'react-router-dom'
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
 import Sidebar from './Sidebar'
 
 export default function Layout() {
   const { isAuthenticated, currentUser, role } = useAuth()
+  const { t } = useTranslation()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
 
@@ -27,12 +29,12 @@ export default function Layout() {
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
-            Меню
+            {t('common.menu')}
           </button>
           <div className="flex items-center gap-3">
-            <p className="hidden sm:block text-xs sm:text-sm text-gray-500 dark:text-gray-400">KRK Monitoring System</p>
+            <p className="hidden sm:block text-xs sm:text-sm text-gray-500 dark:text-gray-400">{t('common.system')}</p>
             <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-300">
-              <span className="text-gray-400 dark:text-gray-500">Авторизован:</span>{' '}
+              <span className="text-gray-400 dark:text-gray-500">{t('auth.authorizedAs')}</span>{' '}
               <span className="font-semibold">{currentUser || '—'}</span>
               <span className="text-gray-400 dark:text-gray-500"> ({role || 'staff'})</span>
             </div>

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { getLdapUsers } from '../services/api'
 import Spinner from '../components/Spinner'
 
 export default function LdapUsersPage() {
+  const { t } = useTranslation()
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -14,7 +16,7 @@ export default function LdapUsersPage() {
         setItems(data || [])
         setError('')
       })
-      .catch(() => setError('Не удалось загрузить LDAP пользователей'))
+      .catch(() => setError(t('ldap.loadError')))
       .finally(() => setLoading(false))
   }, [])
 
@@ -30,24 +32,24 @@ export default function LdapUsersPage() {
   }, [items, query])
 
   return (
-    <div className="space-y-5 max-w-6xl">
+    <div className="space-y-5">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">LDAP пользователи</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t('ldap.title')}</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Пользователи из подключенного LDAP сервера (dc1.kaztbu.edu.kz)
+            {t('ldap.subtitle')}
           </p>
         </div>
         <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300">
-          Всего: {filtered.length}
+          {t('ldap.total', {count: filtered.length})}
         </span>
       </div>
 
       <div className="card p-4">
-        <label className="label mb-2">Поиск</label>
+        <label className="label mb-2">{t('ldap.searchLabel')}</label>
         <input
           className="input"
-          placeholder="Логин, ФИО или DN"
+          placeholder={t('ldap.searchPlaceholder')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -63,9 +65,9 @@ export default function LdapUsersPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide bg-gray-50 dark:bg-gray-800/50">
-                  <th className="px-4 py-3">Логин</th>
-                  <th className="px-4 py-3">ФИО</th>
-                  <th className="px-4 py-3">LDAP DN</th>
+                  <th className="px-4 py-3">{t('ldap.loginCol')}</th>
+                  <th className="px-4 py-3">{t('ldap.nameCol')}</th>
+                  <th className="px-4 py-3">{t('ldap.dnCol')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -80,8 +82,8 @@ export default function LdapUsersPage() {
             </table>
             {filtered.length === 0 && (
               <div className="text-center py-10 text-gray-400 space-y-2">
-                <p>LDAP пользователи не найдены.</p>
-                <p className="text-xs">Проверьте LDAP настройки и доступность сервера.</p>
+                <p>{t('ldap.notFound')}</p>
+                <p className="text-xs">{t('ldap.checkSettings')}</p>
               </div>
             )}
           </div>

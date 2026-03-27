@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { createLocalUser, getLocalUsers, updateLocalUser, updateLocalUserRole } from '../services/api'
 import Spinner from '../components/Spinner'
 
 export default function UsersPage() {
+  const { t } = useTranslation()
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -19,7 +21,7 @@ export default function UsersPage() {
         setUsers(data || [])
         setError('')
       })
-      .catch(() => setError('Не удалось загрузить список пользователей'))
+      .catch(() => setError(t('users.loadError')))
       .finally(() => setLoading(false))
   }, [])
 
@@ -39,7 +41,7 @@ export default function UsersPage() {
       const updated = await updateLocalUserRole(username, role)
       setUsers((prev) => prev.map((item) => (item.username === username ? updated : item)))
     } catch {
-      setError('Не удалось обновить роль пользователя')
+      setError(t('users.roleUpdateError'))
     } finally {
       setSavingRoleFor('')
     }
@@ -54,7 +56,7 @@ export default function UsersPage() {
       setUsers((prev) => [created, ...prev])
       setNewUser({ username: '', display_name: '', password: '', role: 'staff' })
     } catch (err) {
-      setError(err.response?.data?.detail || 'Не удалось создать пользователя')
+      setError(err.response?.data?.detail || t('users.createError'))
     } finally {
       setCreating(false)
     }
@@ -89,54 +91,54 @@ export default function UsersPage() {
       setUsers((prev) => prev.map((item) => (item.username === username ? updated : item)))
       cancelEdit()
     } catch (err) {
-      setError(err.response?.data?.detail || 'Не удалось обновить пользователя')
+      setError(err.response?.data?.detail || t('users.updateError'))
     }
   }
 
   return (
-    <div className="space-y-5 max-w-5xl">
+    <div className="space-y-5">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Пользователи</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t('users.title')}</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Локальные пользователи из таблицы users (авторизованные в системе)
+            {t('users.subtitle')}
           </p>
         </div>
         <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300">
-          Всего: {filtered.length}
+          {t('users.total', {count: filtered.length})}
         </span>
       </div>
 
       <div className="card p-4">
-        <label className="label mb-2">Поиск пользователя</label>
+        <label className="label mb-2">{t('users.searchLabel')}</label>
         <input
           className="input"
-          placeholder="Логин или ФИО"
+          {...{placeholder: t('users.searchPlaceholder')}}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
       </div>
 
       <div className="card p-4">
-        <h2 className="font-semibold text-gray-900 dark:text-white mb-3">Добавить пользователя вручную</h2>
+        <h2 className="font-semibold text-gray-900 dark:text-white mb-3">{t('users.addTitle')}</h2>
         <form className="grid grid-cols-1 md:grid-cols-4 gap-3" onSubmit={handleCreateUser}>
           <input
             className="input"
-            placeholder="Логин"
+            placeholder={t('users.loginPlaceholder')}
             value={newUser.username}
             onChange={(e) => setNewUser((prev) => ({ ...prev, username: e.target.value }))}
             required
           />
           <input
             className="input"
-            placeholder="ФИО"
+            placeholder={t('users.namePlaceholder')}
             value={newUser.display_name}
             onChange={(e) => setNewUser((prev) => ({ ...prev, display_name: e.target.value }))}
           />
           <input
             className="input"
             type="password"
-            placeholder="Пароль"
+            placeholder={t('users.passwordPlaceholder')}
             value={newUser.password}
             onChange={(e) => setNewUser((prev) => ({ ...prev, password: e.target.value }))}
             required
@@ -152,7 +154,7 @@ export default function UsersPage() {
               <option value="staff">staff</option>
             </select>
             <button className="btn-primary whitespace-nowrap" type="submit" disabled={creating}>
-              {creating ? 'Создание...' : 'Добавить'}
+              {creating ? t('users.adding') : t('users.addBtn')}
             </button>
           </div>
         </form>
@@ -166,16 +168,79 @@ export default function UsersPage() {
         ) : error ? (
           <div className="text-center text-red-500 py-14">{error}</div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+            {/* Mobile: card list */}
+            <div className="sm:hidden divide-y divide-gray-100 dark:divide-gray-800">
+              {filtered.map((user) => (
+                <div key={user.username} className="p-4 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="font-medium text-gray-900 dark:text-gray-100">{user.username}</p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">{user.display_name || '—'}</p>
+                    </div>
+                    <span className="text-xs px-2 py-1 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium flex-shrink-0">
+                      {user.role || 'staff'}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    <span>{user.auth_source || '—'}</span>
+                    {user.is_ldap && <span>LDAP</span>}
+                    {user.last_login_at && <span>{user.last_login_at}</span>}
+                  </div>
+                  <div className="flex gap-2">
+                    <select
+                      className="input h-8 py-1 text-xs"
+                      value={user.role || 'staff'}
+                      disabled={savingRoleFor === user.username}
+                      onChange={(e) => handleRoleChange(user.username, e.target.value)}
+                    >
+                      <option value="admin">admin</option>
+                      <option value="inspector">inspector</option>
+                      <option value="staff">staff</option>
+                    </select>
+                    <button className="btn-secondary text-xs px-3 py-1.5" onClick={() => startEdit(user)}>
+                      {t('users.editBtn')}
+                    </button>
+                  </div>
+                  {editingUser === user.username && (
+                    <div className="space-y-2 pt-2 border-t border-gray-100 dark:border-gray-800">
+                      <input
+                        className="input"
+                        placeholder={t('users.namePlaceholder')}
+                        value={editForm.display_name}
+                        onChange={(e) => setEditForm((prev) => ({ ...prev, display_name: e.target.value }))}
+                      />
+                      <input
+                        className="input"
+                        type="password"
+                        placeholder={t('users.newPasswordPlaceholder')}
+                        value={editForm.password}
+                        onChange={(e) => setEditForm((prev) => ({ ...prev, password: e.target.value }))}
+                      />
+                      <div className="flex gap-2">
+                        <button className="btn-primary text-xs px-3 py-2" onClick={() => saveEdit(user.username)}>{t('users.saveBtn')}</button>
+                        <button className="btn-secondary text-xs px-3 py-2" onClick={cancelEdit}>{t('users.cancelBtn')}</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {filtered.length === 0 && (
+                <p className="text-center py-10 text-gray-400">{t('users.notFound')}</p>
+              )}
+            </div>
+
+            {/* Desktop: table */}
+            <div className="hidden sm:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide bg-gray-50 dark:bg-gray-800/50">
-                  <th className="px-4 py-3">Логин</th>
-                  <th className="px-4 py-3">ФИО</th>
-                  <th className="px-4 py-3">Роль</th>
-                  <th className="px-4 py-3">Источник</th>
-                  <th className="px-4 py-3">LDAP</th>
-                  <th className="px-4 py-3">Последний вход</th>
+                  <th className="px-4 py-3">{t('users.loginCol')}</th>
+                  <th className="px-4 py-3">{t('users.nameCol')}</th>
+                  <th className="px-4 py-3">{t('users.roleCol')}</th>
+                  <th className="px-4 py-3">{t('users.sourceCol')}</th>
+                  <th className="px-4 py-3">{t('users.ldapCol')}</th>
+                  <th className="px-4 py-3">{t('users.lastLoginCol')}</th>
                   <th className="px-4 py-3"></th>
                 </tr>
               </thead>
@@ -217,7 +282,7 @@ export default function UsersPage() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{user.auth_source || '—'}</td>
-                    <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{user.is_ldap ? 'Да' : 'Нет'}</td>
+                    <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{user.is_ldap ? t('users.isLdap') : t('users.notLdap')}</td>
                     <td className="px-4 py-3 text-gray-500 dark:text-gray-400 whitespace-nowrap">{user.last_login_at || '—'}</td>
                     <td className="px-4 py-3 text-right">
                       {editingUser === user.username ? (
@@ -230,15 +295,15 @@ export default function UsersPage() {
                             onChange={(e) => setEditForm((prev) => ({ ...prev, password: e.target.value }))}
                           />
                           <button className="btn-primary text-xs px-3 py-2" onClick={() => saveEdit(user.username)}>
-                            Сохранить
+                            {t('users.saveBtn')}
                           </button>
                           <button className="btn-secondary text-xs px-3 py-2" onClick={cancelEdit}>
-                            Отмена
+                            {t('users.cancelBtn')}
                           </button>
                         </div>
                       ) : (
                         <button className="btn-secondary text-xs px-3 py-2" onClick={() => startEdit(user)}>
-                          Изменить
+                          {t('users.editBtn')}
                         </button>
                       )}
                     </td>
@@ -249,7 +314,8 @@ export default function UsersPage() {
             {filtered.length === 0 && (
               <p className="text-center py-10 text-gray-400">Пользователи не найдены</p>
             )}
-          </div>
+            </div>
+          </>
         )}
       </div>
     </div>

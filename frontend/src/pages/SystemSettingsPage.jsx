@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { getBasicInfoCatalog, getLdapSettings, saveLdapSettings, testLdapSettings } from '../services/api'
 import { useTheme } from '../context/ThemeContext'
 import Spinner from '../components/Spinner'
@@ -10,6 +11,7 @@ function countGroups(faculties = []) {
 }
 
 export default function SystemSettingsPage() {
+  const { t } = useTranslation()
   const { dark, toggle } = useTheme()
   const [catalog, setCatalog] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -36,7 +38,7 @@ export default function SystemSettingsPage() {
         setCatalog(data)
         setError('')
       })
-      .catch(() => setError('Не удалось загрузить системные справочники'))
+      .catch(() => setError(t('settings.catalogError')))
       .finally(() => setLoading(false))
   }
 
@@ -56,7 +58,7 @@ export default function SystemSettingsPage() {
         })
         setLdapError('')
       })
-      .catch(() => setLdapError('Не удалось загрузить LDAP настройки'))
+      .catch(() => setLdapError(t('settings.ldapLoadError')))
       .finally(() => setLdapLoading(false))
   }, [])
 
@@ -85,9 +87,9 @@ export default function SystemSettingsPage() {
       const payload = { ...ldap }
       await saveLdapSettings(payload)
       setLdap(payload)
-      setLdapNotice('LDAP настройки сохранены')
+      setLdapNotice(t('settings.ldapSaved'))
     } catch {
-      setLdapError('Не удалось сохранить LDAP настройки')
+      setLdapError(t('settings.ldapSaveError'))
     } finally {
       setLdapSaving(false)
     }
@@ -109,37 +111,37 @@ export default function SystemSettingsPage() {
         setLdapTestError(result.details ? `${result.message}. ${result.details}` : result.message)
       }
     } catch {
-      setLdapTestError('Не удалось выполнить тест LDAP подключения')
+      setLdapTestError(t('settings.ldapTestError'))
     } finally {
       setLdapTesting(false)
     }
   }
 
   return (
-    <div className="space-y-5 max-w-5xl">
+    <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Настройка системы</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Параметры интерфейса и актуальность локальных справочников</p>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t('settings.title')}</h1>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('settings.subtitle')}</p>
       </div>
 
       <div className="card p-5 flex items-center justify-between gap-4">
         <div>
-          <h2 className="font-semibold text-gray-900 dark:text-gray-100">Тема интерфейса</h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Текущая тема: {dark ? 'Тёмная' : 'Светлая'}</p>
+          <h2 className="font-semibold text-gray-900 dark:text-gray-100">{t('settings.theme')}</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('settings.currentTheme')} {dark ? t('settings.dark') : t('settings.light')}</p>
         </div>
         <button className="btn-secondary" onClick={toggle}>
-          Переключить тему
+          {t('settings.switchTheme')}
         </button>
       </div>
 
       <div className="card p-5">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="font-semibold text-gray-900 dark:text-gray-100">Состояние справочников</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Данные для выпадающих списков формы</p>
+            <h2 className="font-semibold text-gray-900 dark:text-gray-100">{t('settings.catalogTitle')}</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('settings.catalogSubtitle')}</p>
           </div>
           <button className="btn-secondary" onClick={load} disabled={loading}>
-            Обновить проверку
+            {t('settings.refreshBtn')}
           </button>
         </div>
 
@@ -150,19 +152,19 @@ export default function SystemSettingsPage() {
         ) : (
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
-              <p className="text-xs text-gray-500 dark:text-gray-400">Преподаватели</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{t('settings.teachers')}</p>
               <p className="text-xl font-bold text-gray-900 dark:text-white">{stats.teachers}</p>
             </div>
             <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
-              <p className="text-xs text-gray-500 dark:text-gray-400">Факультеты</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{t('settings.faculties')}</p>
               <p className="text-xl font-bold text-gray-900 dark:text-white">{stats.faculties}</p>
             </div>
             <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
-              <p className="text-xs text-gray-500 dark:text-gray-400">Специализации</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{t('settings.specializations')}</p>
               <p className="text-xl font-bold text-gray-900 dark:text-white">{stats.specializations}</p>
             </div>
             <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
-              <p className="text-xs text-gray-500 dark:text-gray-400">Группы</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{t('settings.groups')}</p>
               <p className="text-xl font-bold text-gray-900 dark:text-white">{stats.groups}</p>
             </div>
           </div>
@@ -172,15 +174,15 @@ export default function SystemSettingsPage() {
       <div className="card p-5 space-y-4">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="font-semibold text-gray-900 dark:text-gray-100">LDAP настройки</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Подключение к LDAP для аутентификации пользователей</p>
+            <h2 className="font-semibold text-gray-900 dark:text-gray-100">{t('settings.ldapTitle')}</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('settings.ldapSubtitle')}</p>
           </div>
           {ldapLoading && <Spinner size="sm" />}
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="sm:col-span-2">
-            <label className="label">URL сервера</label>
+            <label className="label">{t('settings.serverUrl')}</label>
             <input
               className="input"
               placeholder="ldaps://dc1.kaztbu.edu.kz:636"
@@ -190,7 +192,7 @@ export default function SystemSettingsPage() {
           </div>
 
           <div className="sm:col-span-2">
-            <label className="label">Base DN</label>
+            <label className="label">{t('settings.baseDn')}</label>
             <input
               className="input"
               placeholder="dc=company,dc=local"
@@ -200,7 +202,7 @@ export default function SystemSettingsPage() {
           </div>
 
           <div className="sm:col-span-2">
-            <label className="label">Bind DN</label>
+            <label className="label">{t('settings.bindDn')}</label>
             <input
               className="input"
               placeholder="cn=ldap-reader,ou=service,dc=company,dc=local"
@@ -210,7 +212,7 @@ export default function SystemSettingsPage() {
           </div>
 
           <div className="sm:col-span-2">
-            <label className="label">Пароль администратора AD</label>
+            <label className="label">{t('settings.bindPassword')}</label>
             <input
               className="input"
               type="password"
@@ -221,7 +223,7 @@ export default function SystemSettingsPage() {
           </div>
 
           <div className="sm:col-span-2">
-            <label className="label">Ключ сертификата (PEM)</label>
+            <label className="label">{t('settings.certKey')}</label>
             <textarea
               className="input min-h-[120px]"
               placeholder="-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
@@ -242,10 +244,10 @@ export default function SystemSettingsPage() {
             onClick={handleTestLdap}
             disabled={ldapTesting || ldapSaving || ldapLoading}
           >
-            {ldapTesting ? 'Тестирование...' : 'Тест LDAP'}
+            {ldapTesting ? t('settings.testing') : t('settings.testBtn')}
           </button>
           <button className="btn-primary" onClick={handleSaveLdap} disabled={ldapSaving || ldapLoading}>
-            {ldapSaving ? 'Сохранение...' : 'Сохранить LDAP'}
+            {ldapSaving ? t('settings.saving') : t('settings.saveBtn')}
           </button>
         </div>
       </div>

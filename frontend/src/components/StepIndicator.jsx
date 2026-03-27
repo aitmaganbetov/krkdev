@@ -1,6 +1,10 @@
-const STEPS = ['Основное', 'Детали занятия', 'Рейтинги', 'Подтверждение']
+import { useTranslation } from 'react-i18next'
+
+
 
 export default function StepIndicator({ current }) {
+  const { t } = useTranslation()
+  const STEPS = [t('steps.step1'), t('steps.step2'), t('steps.step3'), t('steps.step4')]
   return (
     <ol className="flex items-center w-full mb-8">
       {STEPS.map((label, i) => {

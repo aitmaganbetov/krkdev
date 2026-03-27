@@ -1,5 +1,8 @@
+import { useTranslation } from 'react-i18next'
+
 // Step 1: Basic class info
 export default function Step1Basic({ data, onChange, catalog, catalogLoading = false, catalogError = '' }) {
+  const { t } = useTranslation()
   const catalogFaculties = catalog?.faculties ?? []
   const teacherOptions = catalog?.teachers ?? []
 
@@ -40,11 +43,11 @@ export default function Step1Basic({ data, onChange, catalog, catalogLoading = f
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Основная информация</h2>
+      <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">{t('steps.basicTitle')}</h2>
 
       {catalogLoading && (
         <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
-          Загружаются справочники факультетов, образовательных программ и групп...
+          {t('steps.catalogLoading')}
         </div>
       )}
 
@@ -56,11 +59,11 @@ export default function Step1Basic({ data, onChange, catalog, catalogLoading = f
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <label className="label">Преподаватель *</label>
+          <label className="label">{t('steps.teacher')}</label>
           <input
             {...field('teacher')}
             list="teacher-options"
-            placeholder="Выберите или начните вводить ФИО"
+            placeholder={t('steps.teacherPlaceholder')}
           />
           <datalist id="teacher-options">
             {teacherOptions.map((teacher) => (
@@ -69,18 +72,18 @@ export default function Step1Basic({ data, onChange, catalog, catalogLoading = f
           </datalist>
         </div>
         <div>
-          <label className="label">Дисциплина *</label>
-          <input {...field('subject')} placeholder="Название дисциплины" />
+          <label className="label">{t('steps.subject')}</label>
+          <input {...field('subject')} placeholder={t('steps.subjectPlaceholder')} />
         </div>
         <div>
-          <label className="label">Факультет *</label>
+          <label className="label">{t('steps.faculty')}</label>
           <select
             value={data.faculty ?? ''}
             onChange={handleFacultyChange}
             className="input"
             required
           >
-            <option value="">Выберите факультет</option>
+            <option value="">{t('steps.selectFaculty')}</option>
             {facultyOptions.map((faculty) => (
               <option key={faculty.id} value={faculty.name_ru}>
                 {faculty.name_ru}
@@ -89,7 +92,7 @@ export default function Step1Basic({ data, onChange, catalog, catalogLoading = f
           </select>
         </div>
         <div>
-          <label className="label">Образовательная программа (ОП) *</label>
+          <label className="label">{t('steps.op')}</label>
           <select
             value={data.op ?? ''}
             onChange={handleSpecializationChange}
@@ -97,7 +100,7 @@ export default function Step1Basic({ data, onChange, catalog, catalogLoading = f
             required
             disabled={!data.faculty}
           >
-            <option value="">{data.faculty ? 'Выберите ОП' : 'Сначала выберите факультет'}</option>
+            <option value="">{data.faculty ? t('steps.selectOp') : t('steps.selectFacultyFirst')}</option>
             {specializationOptions.map((specialization) => (
               <option key={specialization.id} value={specialization.name_ru}>
                 {specialization.code ? `${specialization.code} - ${specialization.name_ru}` : specialization.name_ru}
@@ -106,7 +109,7 @@ export default function Step1Basic({ data, onChange, catalog, catalogLoading = f
           </select>
         </div>
         <div>
-          <label className="label">Группа *</label>
+          <label className="label">{t('steps.group')}</label>
           <select
             value={data.group_name ?? ''}
             onChange={handleGroupChange}
@@ -114,7 +117,7 @@ export default function Step1Basic({ data, onChange, catalog, catalogLoading = f
             required
             disabled={!data.op}
           >
-            <option value="">{data.op ? 'Выберите группу' : 'Сначала выберите ОП'}</option>
+            <option value="">{data.op ? t('steps.selectGroup') : t('steps.selectOpFirst')}</option>
             {groupOptions.map((group) => (
               <option key={group.id} value={group.name}>
                 {group.name}
@@ -123,8 +126,8 @@ export default function Step1Basic({ data, onChange, catalog, catalogLoading = f
           </select>
         </div>
         <div>
-          <label className="label">Аудитория *</label>
-          <input {...field('room')} placeholder="Номер или 'Онлайн'" />
+          <label className="label">{t('steps.room')}</label>
+          <input {...field('room')} placeholder={t('steps.roomPlaceholder')} />
         </div>
       </div>
     </div>

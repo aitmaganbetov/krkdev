@@ -21,6 +21,12 @@
   .btn-danger {
     @apply btn bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
   }
+  .btn-warning {
+    @apply btn bg-amber-500 text-white hover:bg-amber-600 focus:ring-amber-400;
+  }
+  .btn-success {
+    @apply btn bg-green-600 text-white hover:bg-green-700 focus:ring-green-500;
+  }
   .card {
     @apply bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800;
   }

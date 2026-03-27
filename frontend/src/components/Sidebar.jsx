@@ -1,11 +1,12 @@
 import { NavLink, useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 
 const navItems = [
   {
     to: '/dashboard',
-    label: 'Дашборд',
+    labelKey: 'nav.dashboard',
     roles: ['admin', 'inspector'],
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -16,7 +17,7 @@ const navItems = [
   },
   {
     to: '/records',
-    label: 'Записи',
+    labelKey: 'nav.records',
     roles: ['admin', 'inspector', 'staff'],
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -27,7 +28,7 @@ const navItems = [
   },
   {
     to: '/records/new',
-    label: 'Добавить запись',
+    labelKey: 'nav.addRecord',
     roles: ['admin', 'inspector', 'staff'],
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -38,7 +39,7 @@ const navItems = [
   },
   {
     to: '/users',
-    label: 'Пользователи',
+    labelKey: 'nav.users',
     roles: ['admin'],
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -49,7 +50,7 @@ const navItems = [
   },
   {
     to: '/ldap-users',
-    label: 'LDAP пользователи',
+    labelKey: 'nav.ldapUsers',
     roles: ['admin'],
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -61,7 +62,7 @@ const navItems = [
   },
   {
     to: '/settings',
-    label: 'Настройка системы',
+    labelKey: 'nav.settings',
     roles: ['admin'],
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -76,7 +77,13 @@ const navItems = [
 export default function Sidebar({ mobileOpen, onMobileClose, collapsed, onToggleCollapse }) {
   const { logout, role } = useAuth()
   const { dark, toggle } = useTheme()
+  const { t, i18n } = useTranslation()
   const navigate = useNavigate()
+
+  const changeLang = (lng) => {
+    i18n.changeLanguage(lng)
+    localStorage.setItem('lang', lng)
+  }
 
   const handleLogout = () => {
     logout()
@@ -102,14 +109,14 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed, onToggle
           <span className="text-lg font-bold text-primary-600 dark:text-primary-400 tracking-tight">
             KRK Monitor
           </span>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">QMC System</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{t('sidebar.subtitle')}</p>
         </div>
 
         <div className="flex items-center gap-1">
           <button
             onClick={onToggleCollapse}
             className="hidden lg:inline-flex p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
-            title={collapsed ? 'Развернуть' : 'Свернуть'}
+            title={collapsed ? t('sidebar.expand') : t('sidebar.collapse')}
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               {collapsed
@@ -120,8 +127,7 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed, onToggle
           <button
             onClick={onMobileClose}
             className="lg:hidden inline-flex p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
-            aria-label="Закрыть меню"
-          >
+            aria-label={t('sidebar.closeMenu')}>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -132,9 +138,9 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed, onToggle
       <nav className="flex-1 px-3 py-4 space-y-1">
         {navItems.map((item) => (
           item.roles.includes(role) ? (
-          <NavLink key={item.to} to={item.to} onClick={handleNavigate} className={navLinkClass} title={collapsed ? item.label : undefined}>
+          <NavLink key={item.to} to={item.to} onClick={handleNavigate} className={navLinkClass} title={collapsed ? t(item.labelKey) : undefined}>
             {item.icon}
-            <span className={collapsed ? 'lg:hidden' : ''}>{item.label}</span>
+            <span className={collapsed ? 'lg:hidden' : ''}>{t(item.labelKey)}</span>
           </NavLink>
           ) : null
         ))}
@@ -144,7 +150,7 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed, onToggle
         <button
           onClick={toggle}
           className={`flex items-center ${collapsed ? 'lg:justify-center' : ''} gap-3 w-full px-3 py-2.5 rounded-xl text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100 transition-colors`}
-          title={collapsed ? (dark ? 'Светлая тема' : 'Темная тема') : undefined}
+          title={collapsed ? (dark ? t('sidebar.lightTheme') : t('sidebar.darkTheme')) : undefined}
         >
           {dark ? (
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -157,19 +163,35 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed, onToggle
                 d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
             </svg>
           )}
-          <span className={collapsed ? 'lg:hidden' : ''}>{dark ? 'Светлая тема' : 'Темная тема'}</span>
+          <span className={collapsed ? 'lg:hidden' : ''}>{dark ? t('sidebar.lightTheme') : t('sidebar.darkTheme')}</span>
         </button>
+
+        <div className={`flex items-center ${collapsed ? 'lg:hidden' : ''} gap-1 px-3 py-1`}>
+          {['ru', 'kz', 'en'].map((lng) => (
+            <button
+              key={lng}
+              onClick={() => changeLang(lng)}
+              className={`flex-1 py-1 rounded-lg text-xs font-semibold uppercase transition-colors ${
+                i18n.language === lng
+                  ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300'
+                  : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+              }`}
+            >
+              {lng}
+            </button>
+          ))}
+        </div>
 
         <button
           onClick={handleLogout}
           className={`flex items-center ${collapsed ? 'lg:justify-center' : ''} gap-3 w-full px-3 py-2.5 rounded-xl text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors`}
-          title={collapsed ? 'Выйти' : undefined}
+          title={collapsed ? t('sidebar.logout') : undefined}
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
               d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
           </svg>
-          <span className={collapsed ? 'lg:hidden' : ''}>Выйти</span>
+          <span className={collapsed ? 'lg:hidden' : ''}>{t('sidebar.logout')}</span>
         </button>
       </div>
     </>
@@ -181,7 +203,7 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed, onToggle
         <button
           className="lg:hidden fixed inset-0 z-30 bg-black/45 backdrop-blur-[1px]"
           onClick={onMobileClose}
-          aria-label="Закрыть меню"
+          aria-label={t('sidebar.closeMenu')}
         />
       )}
 

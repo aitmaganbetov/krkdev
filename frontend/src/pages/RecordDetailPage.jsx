@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { 
   getRecord, deleteRecord, submitRecord, sendRecordToRework, acceptRecord 
 } from '../services/api'
@@ -8,32 +9,18 @@ import Spinner from '../components/Spinner'
 import StatusBadge from '../components/StatusBadge'
 import { isSameIdentity } from '../utils/identity'
 
-const RATING_LABELS = {
-  '1.1': 'Соответствие темы и содержания занятия силлабусу',
-  '1.2': 'Системность и логическая последовательность в содержании материала',
-  '1.3': 'Содержание и изложение учебного материала',
-  '1.4': 'Организация самостоятельной работы обучающихся',
-  '1.5': 'Использование эффективных методов контроля хода занятия и результатов выполнения заданий обучающимися',
-  '1.6': 'Рациональность использования времени на изучение учебных вопросов',
-  '1.7': 'Соответствие преподавания дисциплины заявленному языку обучения (казахский, английский, русский)',
-  '2.1': 'Использование приемов поддержания внимания обучающихся и способность установить с ними контакт',
-  '2.2': 'Умение вызвать и поддержать интерес аудитории к дисциплине',
-  '2.3': 'Ясность и доступность учебного материала',
-  '2.4': 'Культура речи, дикция, эрудиция, внешний вид, манера поведения, умение держаться перед аудиторией',
-  '2.5': 'Доброжелательность и такт по отношению к обучающемуся',
-  '2.6': 'Организация и активизация деятельности обучающихся, побуждение к высказыванию и анализ выступлений',
-  '3.1': 'Использование ТСО, современных интерактивных методов, цифровых ресурсов и наглядных материалов',
-  '3.2': 'Творческий подход и интерес к своему делу',
-  '3.3': 'Практическое применение знаний. Практико-ориентированность',
-  '3.4': 'Актуальность и новизна предлагаемого материала',
-}
+const RATING_KEYS = [
+  '1.1','1.2','1.3','1.4','1.5','1.6','1.7',
+  '2.1','2.2','2.3','2.4','2.5','2.6',
+  '3.1','3.2','3.3','3.4',
+]
 
-function RatingBar({ label, value }) {
+function RatingBar({ ratingKey, label, value }) {
   const pct = (value / 10) * 100
   const color = value >= 8 ? 'bg-green-500' : value >= 6 ? 'bg-yellow-500' : 'bg-red-500'
   return (
     <div className="flex items-center gap-3 text-sm print:items-start">
-      <span className="w-6 text-xs font-mono text-gray-400 print:flex-shrink-0">{Object.keys(RATING_LABELS).find(k => RATING_LABELS[k] === label)}</span>
+      <span className="w-6 text-xs font-mono text-gray-400 print:flex-shrink-0">{ratingKey}</span>
       <span className="flex-1 text-gray-600 dark:text-gray-400 truncate print:truncate-none print:whitespace-normal print:break-words">{label}</span>
       <div className="w-28 bg-gray-200 dark:bg-gray-700 rounded-full h-2 print:w-24 print:flex-shrink-0 print:mt-1">
         <div className={`h-2 rounded-full ${color}`} style={{ width: `${pct}%` }} />
@@ -47,6 +34,7 @@ export default function RecordDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const location = useLocation()
+  const { t } = useTranslation()
   const [record, setRecord] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError]   = useState('')
@@ -64,12 +52,12 @@ export default function RecordDetailPage() {
   useEffect(() => {
     getRecord(id)
       .then(setRecord)
-      .catch(() => setError('Запись не найдена'))
+      .catch(() => setError(t('record.notFound')))
       .finally(() => setLoading(false))
   }, [id])
 
   const handleDelete = async () => {
-    if (!window.confirm('Удалить эту запись?')) return
+    if (!window.confirm(t('record.deleteConfirm'))) return
     setActionsLoading(true)
     try {
       await deleteRecord(id)
@@ -81,7 +69,7 @@ export default function RecordDetailPage() {
   }
 
   const handleSubmit = async () => {
-    if (!window.confirm('Отправить запись на проверку?')) return
+    if (!window.confirm(t('record.submitConfirm'))) return
     setActionsLoading(true)
     try {
       const updated = await submitRecord(id)
@@ -94,7 +82,7 @@ export default function RecordDetailPage() {
   }
 
   const handleSendToRework = async () => {
-    if (!window.confirm('Отправить на доработку?')) return
+    if (!window.confirm(t('record.reworkConfirm'))) return
     setActionsLoading(true)
     try {
       const updated = await sendRecordToRework(id)
@@ -107,7 +95,7 @@ export default function RecordDetailPage() {
   }
 
   const handleAccept = async () => {
-    if (!window.confirm('Принять запись?')) return
+    if (!window.confirm(t('record.acceptConfirm'))) return
     setActionsLoading(true)
     try {
       const updated = await acceptRecord(id)
@@ -124,12 +112,12 @@ export default function RecordDetailPage() {
   }
 
   if (loading) return <div className="flex justify-center py-20"><Spinner size="lg" /></div>
-  if (!record) return <p className="text-red-500 text-center mt-20">{error || 'Запись не найдена'}</p>
+  if (!record) return <p className="text-red-500 text-center mt-20">{error || t('record.notFound')}</p>
 
   const { ratings = {} } = record
 
   return (
-    <div className="max-w-4xl space-y-5 print:max-w-none print:space-y-4">
+    <div className="space-y-5 print:max-w-none print:space-y-4">
       {location.state?.notice && (
         <div className="rounded-xl border border-green-200 bg-green-50 text-green-800 px-4 py-3 text-sm dark:bg-green-900/20 dark:border-green-800 dark:text-green-300 print:hidden">
           {location.state.notice}
@@ -149,13 +137,13 @@ export default function RecordDetailPage() {
       )}
 
       {/* Header */}
-      <div className="flex items-start justify-between gap-4 print:block">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 print:block">
         <div>
           <button
             className="text-sm text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 mb-2 print:hidden"
             onClick={() => navigate(-1)}
           >
-            ← Назад
+            {t('record.back')}
           </button>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{record.subject}</h1>
           <p className="text-gray-500 dark:text-gray-400 mt-1">{record.teacher}</p>
@@ -168,14 +156,14 @@ export default function RecordDetailPage() {
               onClick={handlePrint}
               type="button"
             >
-              Печать
+              {t('record.print')}
             </button>
             {canEdit && (
               <button
                 className="btn-secondary text-sm"
                 onClick={() => navigate(`/records/${id}/edit`)}
               >
-                Редактировать
+                {t('record.edit')}
               </button>
             )}
             {canSubmit && (
@@ -184,7 +172,7 @@ export default function RecordDetailPage() {
                 onClick={handleSubmit}
                 disabled={actionsLoading}
               >
-                {actionsLoading ? '...' : 'Отправить'}
+                {actionsLoading ? '...' : t('record.submit')}
               </button>
             )}
             {canSendToRework && (
@@ -193,7 +181,7 @@ export default function RecordDetailPage() {
                 onClick={handleSendToRework}
                 disabled={actionsLoading}
               >
-                {actionsLoading ? '...' : 'На доработку'}
+                {actionsLoading ? '...' : t('record.toRework')}
               </button>
             )}
             {canAccept && (
@@ -202,7 +190,7 @@ export default function RecordDetailPage() {
                 onClick={handleAccept}
                 disabled={actionsLoading}
               >
-                {actionsLoading ? '...' : 'Принять'}
+                {actionsLoading ? '...' : t('record.accept')}
               </button>
             )}
             {canDelete && (
@@ -211,32 +199,31 @@ export default function RecordDetailPage() {
                 onClick={handleDelete}
                 disabled={actionsLoading}
               >
-                {actionsLoading ? '...' : 'Удалить'}
+                {actionsLoading ? '...' : t('record.deleteBtn')}
               </button>
             )}
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 print:grid-cols-1 print:gap-3">
-        {/* Scores */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 print:grid-cols-1 print:gap-3">        {/* Scores */}
         <div className="lg:col-span-1 space-y-4 print:grid print:grid-cols-2 print:gap-3 print:space-y-0">
           <div className="card p-4 text-center">
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Общий балл</p>
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{t('record.totalScore')}</p>
             <p className={`text-5xl font-bold ${
               record.score >= 7 ? 'text-green-600 dark:text-green-400'
               : record.score >= 5 ? 'text-yellow-500 dark:text-yellow-400'
               : 'text-red-600 dark:text-red-400'
             }`}>{record.score.toFixed(1)}</p>
-            <p className="text-xs text-gray-400 mt-1">з 10</p>
+            <p className="text-xs text-gray-400 mt-1">{t('record.outOf10')}</p>
           </div>
           <div className="card p-4 text-center">
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Посещаемость</p>
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{t('record.attendance')}</p>
             <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">
               {record.attendance.toFixed(0)}%
             </p>
             <p className="text-xs text-gray-400 mt-1">
-              {record.students_fact} / {record.students_plan} студентов
+              {record.students_fact} / {record.students_plan} {t('record.students')}
             </p>
           </div>
         </div>
@@ -244,19 +231,19 @@ export default function RecordDetailPage() {
         {/* Details */}
         <div className="lg:col-span-2 space-y-4">
           <div className="card p-4">
-            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Информация</h2>
+            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">{t('record.info')}</h2>
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm print:grid-cols-1">
               {[
-                ['Факультет', record.faculty],
-                ['ОП', record.op],
-                ['Группа', record.group_name],
-                ['Аудитория', record.room],
-                ['Тип', record.lesson_type],
-                ['Формат', record.format],
-                ['Отправил', record.submitted_by_display || record.submitted_by || '—'],
-                ['Проверил', record.reviewed_by_display || record.reviewed_by || '—'],
-                ['Учебный год', record.academic_year],
-                ['Дата', new Date(record.datetime).toLocaleString('ru-RU')],
+                [t('record.faculty'), record.faculty],
+                [t('record.op'), record.op],
+                [t('record.group'), record.group_name],
+                [t('record.room'), record.room],
+                [t('record.type'), record.lesson_type],
+                [t('record.format'), record.format],
+                [t('record.submittedBy'), record.submitted_by_display || record.submitted_by || '—'],
+                [t('record.reviewedBy'), record.reviewed_by_display || record.reviewed_by || '—'],
+                [t('record.academicYear'), record.academic_year],
+                [t('record.date'), new Date(record.datetime).toLocaleString('ru-RU')],
               ].map(([k, v]) => (
                 <div key={k} className="flex gap-2 print:block">
                   <dt className="text-gray-400 w-28 flex-shrink-0 print:w-auto print:mb-1">{k}:</dt>
@@ -266,13 +253,13 @@ export default function RecordDetailPage() {
             </dl>
             {record.topic && (
               <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-800 text-sm">
-                <span className="text-gray-400">Тема: </span>
+                <span className="text-gray-400">{t('record.topic')}: </span>
                 <span className="text-gray-800 dark:text-gray-200 break-words whitespace-normal">{record.topic}</span>
               </div>
             )}
             {record.comment && (
               <div className="mt-2 text-sm">
-                <span className="text-gray-400">Комментарий: </span>
+                <span className="text-gray-400">{t('record.comment')}: </span>
                 <span className="text-gray-600 dark:text-gray-400 italic break-words whitespace-normal">{record.comment}</span>
               </div>
             )}
@@ -280,10 +267,10 @@ export default function RecordDetailPage() {
 
           {/* Ratings breakdown */}
           <div className="card p-4">
-            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Рейтинговые оценки</h2>
+            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">{t('record.ratings')}</h2>
             <div className="space-y-2">
-              {Object.entries(RATING_LABELS).map(([key, label]) => (
-                <RatingBar key={key} label={label} value={ratings[key] ?? 0} />
+              {RATING_KEYS.map((key) => (
+                <RatingBar key={key} ratingKey={key} label={t(`ratings.${key}`)} value={ratings[key] ?? 0} />
               ))}
             </div>
           </div>

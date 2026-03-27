@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { createRecord, getBasicInfoCatalog } from '../services/api'
 import { useAuth } from '../context/AuthContext'
@@ -21,6 +22,7 @@ function createInitial() {
 }
 
 export default function CreateRecordPage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const { currentUser } = useAuth()
   const [step, setStep]     = useState(0)
@@ -47,7 +49,7 @@ export default function CreateRecordPage() {
       })
       .catch((err) => {
         setCatalog({ faculties: [], academic_years: [] })
-        setCatalogError(err.response?.data?.detail ?? 'Не удалось загрузить справочники основной информации.')
+        setCatalogError(err.response?.data?.detail ?? t('common.loadError'))
       })
       .finally(() => setCatalogLoading(false))
   }, [])
@@ -81,18 +83,18 @@ export default function CreateRecordPage() {
       }
       delete payload.submitted_by
       const created = await createRecord(payload)
-      navigate(`/records/${created.id}`, { state: { notice: 'Запись успешно сохранена' } })
+      navigate(`/records/${created.id}`, { state: { notice: t('common.saved') } })
     } catch (err) {
-      setError(err.response?.data?.detail ?? 'Ошибка сохранения')
+      setError(err.response?.data?.detail ?? t('common.saveError'))
       setSaving(false)
     }
   }
 
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="mx-auto">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Новая запись</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Заполните форму по шагам</p>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t('createRecord.title')}</h1>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('createRecord.subtitle')}</p>
       </div>
 
       <div className="card p-6">
@@ -125,12 +127,12 @@ export default function CreateRecordPage() {
             onClick={step === 0 ? () => navigate('/records') : back}
             className="btn-secondary"
           >
-            {step === 0 ? 'Отмена' : '← Назад'}
+            {step === 0 ? t('common.cancel') : t('common.back')}
           </button>
 
           {step < 3 ? (
             <button type="button" onClick={next} className="btn-primary">
-              Далее →
+              {t('common.next')}
             </button>
           ) : (
             <button
@@ -139,7 +141,7 @@ export default function CreateRecordPage() {
               disabled={saving}
               className="btn-primary"
             >
-              {saving ? <Spinner size="sm" /> : 'Сохранить запись'}
+              {saving ? <Spinner size="sm" /> : t('common.save')}
             </button>
           )}
         </div>

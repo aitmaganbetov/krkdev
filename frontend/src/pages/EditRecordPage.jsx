@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useParams, useNavigate } from 'react-router-dom'
 import { getBasicInfoCatalog, getRecord, updateRecord } from '../services/api'
 import { useAuth } from '../context/AuthContext'
@@ -33,6 +34,7 @@ const EDITABLE_FIELDS = [
 ]
 
 export default function EditRecordPage() {
+  const { t } = useTranslation()
   const { id } = useParams()
   const navigate = useNavigate()
   const { currentUser } = useAuth()
@@ -57,7 +59,7 @@ export default function EditRecordPage() {
           ratings: normalizeRatingsForForm(r.ratings),
         })
       })
-      .catch(() => setError('Запись не найдена'))
+      .catch(() => setError(t('common.notFound')))
       .finally(() => setLoading(false))
   }, [id, currentUser])
 
@@ -69,7 +71,7 @@ export default function EditRecordPage() {
       })
       .catch((err) => {
         setCatalog({ faculties: [], academic_years: [] })
-        setCatalogError(err.response?.data?.detail ?? 'Не удалось загрузить справочники основной информации.')
+        setCatalogError(err.response?.data?.detail ?? t('common.loadError'))
       })
       .finally(() => setCatalogLoading(false))
   }, [])
@@ -107,22 +109,22 @@ export default function EditRecordPage() {
       payload.datetime = new Date(data.datetime).toISOString()
 
       await updateRecord(id, payload)
-      navigate(`/records/${id}`, { state: { notice: 'Успешно сохранено' } })
+      navigate(`/records/${id}`, { state: { notice: t('common.savedOk') } })
     } catch (err) {
       const detail = err.response?.data?.detail
       if (typeof detail === 'string') {
         setError(detail)
       } else {
-        setError('Ошибка сохранения. Проверьте корректность данных формы.')
+        setError(t('common.saveError'))
       }
       setSaving(false)
     }
   }
 
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="mx-auto">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Редактирование записи #{id}</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t('createRecord.editTitle')} #{id}</h1>
       </div>
 
       <div className="card p-6">
@@ -155,14 +157,14 @@ export default function EditRecordPage() {
             onClick={step === 0 ? () => navigate(`/records/${id}`) : back}
             className="btn-secondary"
           >
-            {step === 0 ? 'Отмена' : '← Назад'}
+            {step === 0 ? t('common.cancel') : t('common.back')}
           </button>
 
           {step < 3 ? (
-            <button type="button" onClick={next} className="btn-primary">Далее →</button>
+            <button type="button" onClick={next} className="btn-primary">{t('common.next')}</button>
           ) : (
             <button type="button" onClick={handleSave} disabled={saving} className="btn-primary">
-              {saving ? <Spinner size="sm" /> : 'Сохранить изменения'}
+              {saving ? <Spinner size="sm" /> : t('common.saveChanges')}
             </button>
           )}
         </div>

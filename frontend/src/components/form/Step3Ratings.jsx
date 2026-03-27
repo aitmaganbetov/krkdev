@@ -1,43 +1,34 @@
+import { useTranslation } from 'react-i18next'
+
 // Step 3: Ratings matrix (values 1-10)
 const SECTIONS = [
   {
     id: 1,
-    title: '1. Оценка содержания и методики проведения занятия',
+    titleKey: 'ratings.section1',
     criteria: [
-      { key: '1.1', label: 'Соответствие темы и содержания занятия силлабусу' },
-      { key: '1.2', label: 'Системность и логическая последовательность в содержании материала' },
-      { key: '1.3', label: 'Содержание и изложение учебного материала' },
-      { key: '1.4', label: 'Организация самостоятельной работы обучающихся' },
-      { key: '1.5', label: 'Использование эффективных методов контроля хода занятия и результатов выполнения заданий обучающимися' },
-      { key: '1.6', label: 'Рациональность использования времени на изучение учебных вопросов' },
-      { key: '1.7', label: 'Соответствие преподавания дисциплины заявленному языку обучения (казахский, английский, русский)' },
+      { key: '1.1' }, { key: '1.2' }, { key: '1.3' }, { key: '1.4' },
+      { key: '1.5' }, { key: '1.6' }, { key: '1.7' },
     ],
   },
   {
     id: 2,
-    title: '2. Оценка педагогических данных преподавателя',
+    titleKey: 'ratings.section2',
     criteria: [
-      { key: '2.1', label: 'Использование приемов поддержания внимания обучающихся и способность установить с ними контакт' },
-      { key: '2.2', label: 'Умение вызвать и поддержать интерес аудитории к дисциплине' },
-      { key: '2.3', label: 'Ясность и доступность учебного материала' },
-      { key: '2.4', label: 'Культура речи, дикция, эрудиция, внешний вид, манера поведения, умение держаться перед аудиторией' },
-      { key: '2.5', label: 'Доброжелательность и такт по отношению к обучающемуся' },
-      { key: '2.6', label: 'Организация и активизация деятельности обучающихся, побуждение к высказыванию и анализ выступлений' },
+      { key: '2.1' }, { key: '2.2' }, { key: '2.3' },
+      { key: '2.4' }, { key: '2.5' }, { key: '2.6' },
     ],
   },
   {
     id: 3,
-    title: '3. Оценка научно-практических работ преподавателя',
+    titleKey: 'ratings.section3',
     criteria: [
-      { key: '3.1', label: 'Использование ТСО, современных интерактивных методов, цифровых ресурсов и наглядных материалов' },
-      { key: '3.2', label: 'Творческий подход и интерес к своему делу' },
-      { key: '3.3', label: 'Практическое применение знаний. Практико-ориентированность' },
-      { key: '3.4', label: 'Актуальность и новизна предлагаемого материала' },
+      { key: '3.1' }, { key: '3.2' }, { key: '3.3' }, { key: '3.4' },
     ],
   },
 ]
 
 function ScoreInput({ value, onChange }) {
+  const { t } = useTranslation()
   return (
     <div className="flex items-center gap-2">
       <select
@@ -45,7 +36,7 @@ function ScoreInput({ value, onChange }) {
         onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
         className="input"
       >
-        <option value="">— выберите —</option>
+        <option value="">{t('steps.selectDefault')}</option>
         {Array.from({ length: 10 }, (_, index) => 10 - index).map((score) => (
           <option key={score} value={score}>{score}</option>
         ))}
@@ -63,6 +54,7 @@ function ScoreInput({ value, onChange }) {
 }
 
 export default function Step3Ratings({ ratings, onChange }) {
+  const { t } = useTranslation()
   const filledRatings = Object.values(ratings).filter((value) => Number.isInteger(value))
   const avg = filledRatings.length
     ? (filledRatings.reduce((a, b) => a + b, 0) / filledRatings.length).toFixed(2)
@@ -71,9 +63,9 @@ export default function Step3Ratings({ ratings, onChange }) {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Рейтинговые оценки</h2>
+        <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">{t('steps.ratingsTitle')}</h2>
         <div className="text-sm">
-          Средний балл:{' '}
+          {t('steps.avgScore')}{' '}
           <span className={`font-bold text-base ${
             avg >= 8 ? 'text-green-600 dark:text-green-400'
             : avg >= 6 ? 'text-yellow-600 dark:text-yellow-400'
@@ -85,18 +77,18 @@ export default function Step3Ratings({ ratings, onChange }) {
       </div>
 
       <div className="card p-3 text-xs text-gray-600 dark:text-gray-400 space-y-1">
-        <p>Шкала посещения/оценки: 10 = 100%, 9 = 90%, 8 = 80%, 7 = 70%, 6 = 60%, 5 = 50%, 4 = 40%, 3 = 30%, 2 = 20%, 1 = 10%.</p>
-        <p>Уровни: высокий (10-9), достаточно высокий (8-7), недостаточно высокий (6-5), низкий (4-3), критерий не соответствует ожиданиям (2-1).</p>
+        <p>{t('steps.scaleNote')}</p>
+        <p>{t('steps.levelsNote')}</p>
       </div>
 
       {SECTIONS.map((section) => (
         <div key={section.id} className="card p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">{section.title}</h3>
-          {section.criteria.map(({ key, label }) => (
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t(section.titleKey)}</h3>
+          {section.criteria.map(({ key }) => (
             <div key={key} className="grid grid-cols-[1fr_2fr] items-center gap-4">
               <span className="text-sm text-gray-600 dark:text-gray-400">
                 <span className="font-mono text-xs text-gray-400 dark:text-gray-500 mr-1">{key}</span>
-                {label}
+                {t(`ratings.${key}`)}
               </span>
               <ScoreInput
                 value={ratings[key] ?? null}

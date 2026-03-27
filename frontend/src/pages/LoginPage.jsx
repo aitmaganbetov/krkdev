@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import Spinner from '../components/Spinner'
@@ -7,7 +8,13 @@ import Spinner from '../components/Spinner'
 export default function LoginPage() {
   const { login } = useAuth()
   const { dark, toggle } = useTheme()
+  const { t, i18n } = useTranslation()
   const navigate = useNavigate()
+
+  const changeLang = (lng) => {
+    i18n.changeLanguage(lng)
+    localStorage.setItem('lang', lng)
+  }
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -22,7 +29,7 @@ export default function LoginPage() {
       await login(username, password)
       navigate('/dashboard', { replace: true })
     } catch (err) {
-      setError(err.response?.data?.detail ?? 'Ошибка входа. Проверьте данные.')
+      setError(err.response?.data?.detail ?? t('auth.loginError'))
     } finally {
       setLoading(false)
     }
@@ -51,12 +58,12 @@ export default function LoginPage() {
       <div className="card w-full max-w-md p-8">
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-bold text-primary-600 dark:text-primary-400">KRK Monitor</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">QMC System — Вход в систему</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">QMC System — {t('auth.title')}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="label">Логин</label>
+            <label className="label">{t('auth.login')}</label>
             <input
               type="text"
               className="input"
@@ -69,7 +76,7 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label className="label">Пароль</label>
+            <label className="label">{t('auth.password')}</label>
             <input
               type="password"
               className="input"
@@ -91,9 +98,26 @@ export default function LoginPage() {
             disabled={loading}
             className="btn-primary w-full mt-2"
           >
-            {loading ? <Spinner size="sm" /> : 'Войти'}
+            {loading ? <Spinner size="sm" /> : t('auth.signIn')}
           </button>
         </form>
+      </div>
+
+      {/* Language switcher */}
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
+        {['ru', 'kz', 'en'].map((lng) => (
+          <button
+            key={lng}
+            onClick={() => changeLang(lng)}
+            className={`px-3 py-1 rounded-lg text-xs font-semibold uppercase transition-colors ${
+              i18n.language === lng
+                ? 'bg-primary-600 text-white'
+                : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+            }`}
+          >
+            {lng}
+          </button>
+        ))}
       </div>
     </div>
   )

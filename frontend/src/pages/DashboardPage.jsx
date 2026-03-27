@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { getDashboardFacultyComparison, getDashboardStats, getRecordFilterOptions } from '../services/api'
 import Spinner from '../components/Spinner'
 
@@ -19,6 +20,7 @@ function StatCard({ title, value, sub, color = 'blue' }) {
 }
 
 export default function DashboardPage() {
+  const { t } = useTranslation()
   const [stats, setStats] = useState(null)
   const [filterOptions, setFilterOptions] = useState({ faculties: [], ops: [] })
   const [comparison, setComparison] = useState([])
@@ -55,7 +57,7 @@ export default function DashboardPage() {
         setStats(statsData)
         setComparison(comparisonData || [])
       })
-      .catch(() => setError('Не удалось загрузить данные'))
+      .catch(() => setError(t('dashboard.loadError')))
       .finally(() => setLoading(false))
   }, [selectedFaculty, selectedOp])
 
@@ -73,9 +75,9 @@ export default function DashboardPage() {
   const averageScoreHeight = Math.max(8, Math.min(100, (Number(stats?.avg_score || 0) / 10) * 100))
 
   const comparisonTitle = useMemo(() => {
-    if (selectedOp) return 'Сравнение по группам'
-    if (selectedFaculty) return 'Сравнение по ОП'
-    return 'Сравнение по факультетам'
+    if (selectedOp) return t('dashboard.compareByGroup')
+    if (selectedFaculty) return t('dashboard.compareByOp')
+    return t('dashboard.compareByFaculty')
   }, [selectedFaculty, selectedOp])
 
   const maxComparisonScore = useMemo(() => Math.max(...comparison.map((item) => Number(item.avg_score || 0)), 10), [comparison])
@@ -86,7 +88,7 @@ export default function DashboardPage() {
     <div className="card p-4">
       <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">{title}</h3>
       {comparison.length === 0 ? (
-        <p className="text-sm text-gray-500 dark:text-gray-400">Недостаточно данных для сравнения.</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('dashboard.noDataChart')}</p>
       ) : (
         <div className="h-[220px] rounded-2xl border border-indigo-100/70 dark:border-indigo-900/40 bg-gradient-to-b from-indigo-50/70 via-white to-emerald-50/60 dark:from-gray-900 dark:via-gray-900 dark:to-emerald-950/30 p-3">
           <div className="h-full w-full flex items-end justify-between gap-2">
@@ -123,39 +125,39 @@ export default function DashboardPage() {
   )
 
   return (
-    <div className="space-y-6 max-w-6xl">
+    <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Дашборд</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Общая статистика системы</p>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t('dashboard.title')}</h1>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('dashboard.subtitle')}</p>
       </div>
 
       {/* Stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <StatCard title="Всего записей" value={stats.total_records} color="blue" />
+        <StatCard title={t('dashboard.totalRecords')} value={stats.total_records} color="blue" />
         <StatCard
-          title="Средний балл"
+          title={t('dashboard.avgScore')}
           value={stats.avg_score.toFixed(1)}
-          sub="з 10"
+          sub={t('dashboard.outOf')}
           color={stats.avg_score >= 7 ? 'green' : stats.avg_score >= 5 ? 'yellow' : 'red'}
         />
         <StatCard
-          title="Средняя посещаемость"
+          title={t('dashboard.avgAttendance')}
           value={`${stats.avg_attendance.toFixed(1)}%`}
           color={stats.avg_attendance >= 75 ? 'green' : 'yellow'}
         />
         <StatCard
-          title="Проблемные записи"
+          title={t('dashboard.problemRecords')}
           value={stats.problem_records}
-          sub="бал < 5"
+          sub={t('dashboard.belowFive')}
           color={stats.problem_records > 0 ? 'red' : 'green'}
         />
       </div>
 
       <div className="card p-5">
-        <h2 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">Фильтры</h2>
+        <h2 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">{t('dashboard.filters')}</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
-            <label className="label">Факультет</label>
+            <label className="label">{t('dashboard.faculty')}</label>
             <select
               className="input"
               value={selectedFaculty}
@@ -164,7 +166,7 @@ export default function DashboardPage() {
                 setSelectedOp('')
               }}
             >
-              <option value="">Все факультеты</option>
+              <option value="">{t('dashboard.allFaculties')}</option>
               {facultyOptions.map((faculty) => (
                 <option key={faculty.name} value={faculty.name}>{faculty.name}</option>
               ))}
@@ -172,13 +174,13 @@ export default function DashboardPage() {
           </div>
 
           <div>
-            <label className="label">Образовательная программа (ОП)</label>
+            <label className="label">{t('dashboard.op')}</label>
             <select
               className="input"
               value={selectedOp}
               onChange={(e) => setSelectedOp(e.target.value)}
             >
-              <option value="">Все ОП</option>
+              <option value="">{t('dashboard.allOp')}</option>
               {opOptions.map((op) => (
                 <option key={op.id} value={op.name}>{op.name}</option>
               ))}
@@ -188,14 +190,14 @@ export default function DashboardPage() {
       </div>
 
       <div className="card p-5">
-        <h2 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">Общий средний балл</h2>
+        <h2 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">{t('dashboard.avgScoreTitle')}</h2>
         {Number(stats.total_records || 0) === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">По выбранным фильтрам записи не найдены.</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t('dashboard.noData')}</p>
         ) : (
           <div className="h-[260px] w-full rounded-2xl border border-indigo-100/70 dark:border-indigo-900/40 bg-gradient-to-b from-indigo-50/70 via-white to-emerald-50/60 dark:from-gray-900 dark:via-gray-900 dark:to-emerald-950/30 p-4">
             <div className="h-full w-full flex items-end justify-center">
               <div className="w-full max-w-[320px] h-full flex flex-col items-center justify-end">
-                <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">Средний балл по фильтрам</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">{t('dashboard.avgScoreLabel')}</div>
                 <div
                   className="w-full rounded-t-xl rounded-b-md bg-gradient-to-b from-indigo-600 to-emerald-500 shadow-[0_10px_18px_rgba(79,70,229,0.25)] transition-all duration-300"
                   style={{
@@ -214,10 +216,10 @@ export default function DashboardPage() {
 
       <div>
         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3">{comparisonTitle}</h2>
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-          {renderComparisonChart('Сравнение: Средний балл', 'avg_score', maxComparisonScore, (v) => `${v.toFixed(1)}`)}
-          {renderComparisonChart('Сравнение: Посещаемость', 'avg_attendance', maxComparisonAttendance, (v) => `${v.toFixed(1)}%`)}
-          {renderComparisonChart('Сравнение: Проблемные записи', 'problem_records', maxComparisonProblems, (v) => `${Math.round(v)}`)}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {renderComparisonChart(t('dashboard.chartScore'), 'avg_score', maxComparisonScore, (v) => `${v.toFixed(1)}`)}
+          {renderComparisonChart(t('dashboard.chartAttendance'), 'avg_attendance', maxComparisonAttendance, (v) => `${v.toFixed(1)}%`)}
+          {renderComparisonChart(t('dashboard.chartProblems'), 'problem_records', maxComparisonProblems, (v) => `${Math.round(v)}`)}
         </div>
       </div>
     </div>

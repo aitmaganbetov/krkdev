@@ -4,7 +4,7 @@ Migration utilities for importing data from remote to local database
 import pymysql
 from typing import Dict
 import os
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from database import engine
 
 def _require_env(name: str) -> str:
@@ -70,6 +70,33 @@ def import_faculties() -> Dict:
             'count': len(faculties)
         }
         
+    except Exception as e:
+        return {
+            'status': 'error',
+            'message': f'{type(e).__name__}: {str(e)}'
+        }
+
+
+def migrate_records_submitted_by() -> Dict:
+    """Add records.submitted_by column via controlled admin migration."""
+    try:
+        inspector = inspect(engine)
+        columns = {col['name'] for col in inspector.get_columns('records')}
+        if 'submitted_by' in columns:
+            return {
+                'status': 'ok',
+                'changed': False,
+                'message': 'records.submitted_by already exists'
+            }
+
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE records ADD COLUMN submitted_by VARCHAR(255) NULL"))
+
+        return {
+            'status': 'ok',
+            'changed': True,
+            'message': 'records.submitted_by column added'
+        }
     except Exception as e:
         return {
             'status': 'error',

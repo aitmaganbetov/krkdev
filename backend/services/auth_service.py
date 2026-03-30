@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
-from fastapi import HTTPException, status, Depends
+from fastapi import HTTPException, status, Depends, Request
 from fastapi.security import OAuth2PasswordBearer
 from dotenv import load_dotenv
 from sqlalchemy import text
@@ -27,7 +27,8 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
 if not SECRET_KEY:
     raise RuntimeError("Environment variable SECRET_KEY is required")
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
+AUTH_COOKIE_NAME = (os.getenv("AUTH_COOKIE_NAME") or "krk_access_token").strip() or "krk_access_token"
 
 ROLE_ADMIN = "admin"
 ROLE_INSPECTOR = "inspector"
@@ -937,12 +938,25 @@ def create_access_token(data: dict) -> str:
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
+def _resolve_access_token(request: Request, bearer_token: str | None = Depends(oauth2_scheme)) -> str:
+    if bearer_token:
+        return bearer_token
+    cookie_token = request.cookies.get(AUTH_COOKIE_NAME)
+    if cookie_token:
+        return cookie_token
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def get_current_user(token: str = Depends(_resolve_access_token)) -> str:
     context = get_current_user_context(token)
     return context["username"]
 
 
-def get_current_user_context(token: str = Depends(oauth2_scheme)) -> dict[str, str]:
+def get_current_user_context(token: str = Depends(_resolve_access_token)) -> dict[str, str]:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",

@@ -3,15 +3,7 @@ import axios from 'axios'
 const api = axios.create({
   baseURL: '/api',
   headers: { 'Content-Type': 'application/json' },
-})
-
-// Attach JWT token on every request
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
+  withCredentials: true,
 })
 
 // Redirect to login on 401
@@ -29,6 +21,12 @@ api.interceptors.response.use(
 // Auth
 export const login = (username, password) =>
   api.post('/auth/login', { username, password }).then((r) => r.data)
+
+export const logout = () =>
+  api.post('/auth/logout').then((r) => r.data)
+
+export const getMe = () =>
+  api.get('/auth/me').then((r) => r.data)
 
 // Records
 export const getRecords = (params) =>

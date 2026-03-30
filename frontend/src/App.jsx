@@ -22,7 +22,8 @@ import SystemSettingsPage from './pages/SystemSettingsPage'
 
 
 function RoleGuard({ allowedRoles, children }) {
-  const { isAuthenticated, hasRole } = useAuth()
+  const { isAuthenticated, authLoading, hasRole } = useAuth()
+  if (authLoading) return null
   if (!isAuthenticated) return <Navigate to="/login" replace />
   if (!hasRole(allowedRoles)) return <Navigate to="/records" replace />
   return children
@@ -30,7 +31,8 @@ function RoleGuard({ allowedRoles, children }) {
 
 
 function HomeRedirect() {
-  const { role } = useAuth()
+  const { authLoading, role } = useAuth()
+  if (authLoading) return null
   if (role === 'staff') return <Navigate to="/records" replace />
   return <Navigate to="/dashboard" replace />
 }

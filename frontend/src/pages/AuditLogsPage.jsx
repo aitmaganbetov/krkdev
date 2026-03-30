@@ -19,10 +19,18 @@ export default function AuditLogsPage() {
   const [total, setTotal] = useState(0)
 
   useEffect(() => {
-    loadLogs()
-    loadStats()
-    loadFilters()
-  }, [page, limit, daysBack, filterAction, filterOutcome, filterActor])
+        if (page === 0 && !logs.length) {
+          loadLogs()
+          loadStats()
+          loadFilters()
+        }
+      }, [])
+
+      useEffect(() => {
+        if (logs.length > 0 || stats) {
+          loadLogs()
+        }
+      }, [page, limit, daysBack, filterAction, filterOutcome, filterActor])
 
   const loadLogs = async () => {
     try {
@@ -42,7 +50,10 @@ export default function AuditLogsPage() {
       })
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }))
-        throw new Error(errorData.detail || `HTTP ${response.status}`)
+        const statusText = response.status === 404 
+          ? 'Логи аудита недоступны. Убедитесь, что бэкенд перезагружен с новым кодом.' 
+          : errorData.detail || `HTTP ${response.status}`
+        throw new Error(statusText)
       }
       const data = await response.json()
       setLogs(data.logs || [])
@@ -242,8 +253,15 @@ export default function AuditLogsPage() {
       {/* Logs Table */}
       {error && (
         <div className="rounded-lg bg-red-50 dark:bg-red-900/20 p-4 border border-red-200 dark:border-red-800">
-          <p className="text-red-700 dark:text-red-300 font-medium mb-2">Ошибка при загрузке логов:</p>
-          <p className="text-red-600 dark:text-red-400 text-sm">{error}</p>
+          <p className="text-red-700 dark:text-red-300 font-bold mb-3">⚠️ Ошибка при загрузке логов аудита</p>
+          <p className="text-red-600 dark:text-red-400 text-sm mb-3">{error}</p>
+          <hr className="border-red-200 dark:border-red-700 my-2" />
+          <p className="text-xs text-red-500 dark:text-red-400 mt-3">
+            <strong>Решение:</strong> Убедитесь, что:
+            <br />1. Бэкенд-сервер перезагружен (должны быть загружены новые маршруты)
+            <br />2. Сервер доступен по адресу указанному в конфигурации
+            <br />3. Пользователь имеет роль администратора
+          </p>
         </div>
       )}
 

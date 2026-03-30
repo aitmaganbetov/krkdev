@@ -179,12 +179,8 @@ def test_ldap_settings(
 
             if certificate_key:
                 context.load_verify_locations(cadata=certificate_key)
-            else:
-                context.check_hostname = False
-                context.verify_mode = ssl.CERT_NONE
 
-            server_hostname = host if context.check_hostname else None
-            with context.wrap_socket(raw_socket, server_hostname=server_hostname) as secured_socket:
+            with context.wrap_socket(raw_socket, server_hostname=host) as secured_socket:
                 cipher = secured_socket.cipher()
                 cipher_name = cipher[0] if cipher else "unknown"
                 tls_details = f"{host}:{port}, cipher={cipher_name}"
@@ -213,7 +209,7 @@ def test_ldap_settings(
             if certificate_key:
                 tls = Tls(validate=ssl.CERT_REQUIRED, ca_certs_data=certificate_key)
             else:
-                tls = Tls(validate=ssl.CERT_NONE)
+                tls = Tls(validate=ssl.CERT_REQUIRED)
 
         server = Server(host, port=port, use_ssl=use_ssl, tls=tls, connect_timeout=timeout_seconds)
         conn = Connection(server, user=body.bind_dn.strip(), password=body.bind_password, auto_bind=True)

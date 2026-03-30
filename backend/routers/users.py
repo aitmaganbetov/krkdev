@@ -288,7 +288,7 @@ def _load_ldap_directory_profiles(db: Session) -> dict[str, dict]:
         if cert_data:
             tls = Tls(validate=ssl.CERT_REQUIRED, ca_certs_data=cert_data)
         else:
-            tls = Tls(validate=ssl.CERT_NONE)
+            tls = Tls(validate=ssl.CERT_REQUIRED)
 
     server = Server(host, port=port, use_ssl=use_ssl, tls=tls, get_info=ALL, connect_timeout=6)
     if bind_dn:
@@ -487,7 +487,7 @@ def list_ldap_directory_users(
             if cert_data:
                 tls = Tls(validate=ssl.CERT_REQUIRED, ca_certs_data=cert_data)
             else:
-                tls = Tls(validate=ssl.CERT_NONE)
+                tls = Tls(validate=ssl.CERT_REQUIRED)
 
         server = Server(host, port=port, use_ssl=use_ssl, tls=tls, get_info=ALL, connect_timeout=6)
 

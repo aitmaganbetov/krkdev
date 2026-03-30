@@ -20,9 +20,29 @@ load_dotenv()
 
 SECRET_KEY = os.getenv("SECRET_KEY", "").strip()
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "480"))
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "").strip()
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
+
+ACCESS_TOKEN_EXPIRE_MINUTES_DEFAULT = 60
+ACCESS_TOKEN_EXPIRE_MINUTES_MIN = 5
+ACCESS_TOKEN_EXPIRE_MINUTES_MAX = 240
+
+
+def _read_access_token_expire_minutes() -> int:
+    raw_value = (os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES") or "").strip()
+    try:
+        ttl = int(raw_value) if raw_value else ACCESS_TOKEN_EXPIRE_MINUTES_DEFAULT
+    except ValueError:
+        ttl = ACCESS_TOKEN_EXPIRE_MINUTES_DEFAULT
+
+    if ttl < ACCESS_TOKEN_EXPIRE_MINUTES_MIN:
+        return ACCESS_TOKEN_EXPIRE_MINUTES_MIN
+    if ttl > ACCESS_TOKEN_EXPIRE_MINUTES_MAX:
+        return ACCESS_TOKEN_EXPIRE_MINUTES_MAX
+    return ttl
+
+
+ACCESS_TOKEN_EXPIRE_MINUTES = _read_access_token_expire_minutes()
 
 if not SECRET_KEY:
     raise RuntimeError("Environment variable SECRET_KEY is required")

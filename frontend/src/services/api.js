@@ -23,6 +23,19 @@ api.interceptors.response.use(
       const requestUrl = String(error.config?.url || '')
       const isAuthProbe = requestUrl.includes('/auth/me')
       const isLoginPage = typeof window !== 'undefined' && window.location.pathname === '/login'
+      const token = localStorage.getItem('token') || ''
+
+      if (!isAuthProbe && !isLoginPage && typeof window !== 'undefined') {
+        fetch('/api/auth/logout', {
+          method: 'POST',
+          credentials: 'include',
+          keepalive: true,
+          headers: {
+            'X-Logout-Reason': 'frontend_401',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        }).catch(() => {})
+      }
 
       localStorage.removeItem('token')
       localStorage.removeItem('username')

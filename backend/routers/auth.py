@@ -13,6 +13,7 @@ from services.auth_service import (
     authenticate_user_details,
     create_access_token,
     get_current_user_context,
+    _resolve_access_token,
 )
 from services.audit_log import audit_event
 
@@ -65,6 +66,73 @@ def _clear_attempts(key: str) -> None:
     with _attempts_lock:
         _failed_attempts.pop(key, None)
         _blocked_until.pop(key, None)
+
+
+def _extract_access_token(request: Request) -> str | None:
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+        if token:
+            return token
+
+    cookie_token = request.cookies.get(AUTH_COOKIE_NAME)
+    if cookie_token:
+        return cookie_token
+
+    return None
+
+
+def _get_request_context_if_valid(request: Request) -> dict[str, str] | None:
+    token = _extract_access_token(request)
+    if not token:
+        return None
+
+    try:
+        return get_current_user_context(token)
+    except HTTPException:
+        return None
+
+
+def _resolve_me_context(request: Request, db: Session) -> dict[str, str]:
+    client_ip = request.client.host if request.client else "unknown"
+    token = _extract_access_token(request)
+    if not token:
+        audit_event(
+            action="auth.me",
+            outcome="failure",
+            actor="unknown",
+            details={"ip": client_ip, "reason": "missing_credentials"},
+            db=db,
+            ip_address=client_ip,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        context = get_current_user_context(token)
+    except HTTPException as exc:
+        audit_event(
+            action="auth.me",
+            outcome="failure",
+            actor="unknown",
+            details={"ip": client_ip, "reason": "invalid_or_expired_token"},
+            db=db,
+            ip_address=client_ip,
+        )
+        raise exc
+
+    audit_event(
+        action="auth.me",
+        outcome="success",
+        actor=context.get("username"),
+        details={"ip": client_ip, "role": context.get("role"), "source": context.get("auth_source")},
+        db=db,
+        ip_address=client_ip,
+    )
+    return context
 
 
 @router.post("/login", response_model=TokenOut)
@@ -147,15 +215,21 @@ def login(body: LoginRequest, request: Request, response: Response, db: Session 
 def logout(
     request: Request,
     response: Response,
-    context: dict[str, str] = Depends(get_current_user_context),
     db: Session = Depends(get_db),
 ):
     client_ip = request.client.host if request.client else "unknown"
+    logout_reason = request.headers.get("X-Logout-Reason") or "manual"
+    context = _get_request_context_if_valid(request)
     audit_event(
         action="auth.logout",
         outcome="success",
-        actor=context.get("username"),
-        details={"ip": client_ip, "role": context.get("role"), "source": context.get("auth_source")},
+        actor=(context or {}).get("username") or "unknown",
+        details={
+            "ip": client_ip,
+            "role": (context or {}).get("role"),
+            "source": (context or {}).get("auth_source"),
+            "reason": logout_reason,
+        },
         db=db,
         ip_address=client_ip,
     )
@@ -164,14 +238,6 @@ def logout(
 
 
 @router.get("/me")
-def me(request: Request, context: dict[str, str] = Depends(get_current_user_context), db: Session = Depends(get_db)):
-    client_ip = request.client.host if request.client else "unknown"
-    audit_event(
-        action="auth.me",
-        outcome="success",
-        actor=context.get("username"),
-        details={"ip": client_ip, "role": context.get("role"), "source": context.get("auth_source")},
-        db=db,
-        ip_address=client_ip,
-    )
+def me(request: Request, db: Session = Depends(get_db)):
+    context = _resolve_me_context(request, db)
     return context

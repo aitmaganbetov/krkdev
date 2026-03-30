@@ -5,11 +5,12 @@ import { useAuth } from '../context/AuthContext'
 import Sidebar from './Sidebar'
 
 export default function Layout() {
-  const { isAuthenticated, currentUser, role } = useAuth()
+  const { isAuthenticated, authLoading, currentUser, role } = useAuth()
   const { t } = useTranslation()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
 
+  if (authLoading) return null
   if (!isAuthenticated) return <Navigate to="/login" replace />
 
   return (

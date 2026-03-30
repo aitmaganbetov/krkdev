@@ -3,9 +3,10 @@ import axios from 'axios'
 const api = axios.create({
   baseURL: '/api',
   headers: { 'Content-Type': 'application/json' },
+  withCredentials: true,
 })
 
-// Attach JWT token on every request
+// Backward compatibility: attach bearer token when backend cookie auth is not yet enabled.
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token')
   if (token) {
@@ -20,6 +21,8 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('token')
+      localStorage.removeItem('username')
+      localStorage.removeItem('role')
       window.location.href = '/login'
     }
     return Promise.reject(error)
@@ -29,6 +32,12 @@ api.interceptors.response.use(
 // Auth
 export const login = (username, password) =>
   api.post('/auth/login', { username, password }).then((r) => r.data)
+
+export const logout = () =>
+  api.post('/auth/logout').then((r) => r.data)
+
+export const getMe = () =>
+  api.get('/auth/me').then((r) => r.data)
 
 // Records
 export const getRecords = (params) =>

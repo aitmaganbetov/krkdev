@@ -76,7 +76,7 @@ export default function RecordsPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t('records.title')}</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            {total} {total === 1 ? t('records.count_one', {count:1}) : total < 5 ? t('records.count_few', {count:total}) : t('records.count_many', {count:total})}
+            {total === 1 ? t('records.count_one', {count:1}) : total < 5 ? t('records.count_few', {count:total}) : t('records.count_many', {count:total})}
           </p>
         </div>
         <button className="btn-primary" onClick={() => navigate('/records/new')}>

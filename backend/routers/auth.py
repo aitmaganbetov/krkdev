@@ -3,9 +3,15 @@ from datetime import datetime, timedelta, timezone
 from threading import Lock
 import os
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from schemas.auth import LoginRequest, TokenOut
-from services.auth_service import authenticate_user_details, create_access_token
+from services.auth_service import (
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    AUTH_COOKIE_NAME,
+    authenticate_user_details,
+    create_access_token,
+    get_current_user_context,
+)
 from services.audit_log import audit_event
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -13,6 +19,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 LOGIN_ATTEMPT_WINDOW_SECONDS = int(os.getenv("LOGIN_ATTEMPT_WINDOW_SECONDS", "300"))
 LOGIN_MAX_FAILED_ATTEMPTS = int(os.getenv("LOGIN_MAX_FAILED_ATTEMPTS", "5"))
 LOGIN_LOCKOUT_SECONDS = int(os.getenv("LOGIN_LOCKOUT_SECONDS", "900"))
+AUTH_COOKIE_SECURE = (os.getenv("AUTH_COOKIE_SECURE", "false").strip().lower() in {"1", "true", "yes", "on"})
+AUTH_COOKIE_SAMESITE = (os.getenv("AUTH_COOKIE_SAMESITE", "lax").strip().lower() or "lax")
 
 _failed_attempts: dict[str, deque[datetime]] = defaultdict(deque)
 _blocked_until: dict[str, datetime] = {}
@@ -58,7 +66,7 @@ def _clear_attempts(key: str) -> None:
 
 
 @router.post("/login", response_model=TokenOut)
-def login(body: LoginRequest, request: Request):
+def login(body: LoginRequest, request: Request, response: Response):
     now = datetime.now(timezone.utc)
     client_ip = request.client.host if request.client else "unknown"
     attempt_key = _make_attempt_key(body.username, client_ip)
@@ -113,4 +121,24 @@ def login(body: LoginRequest, request: Request):
         details={"ip": client_ip, "role": role, "source": source},
     )
     token = create_access_token({"sub": normalized_username, "role": role, "auth_source": source})
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=AUTH_COOKIE_SECURE,
+        samesite=AUTH_COOKIE_SAMESITE,
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
+    )
     return TokenOut(access_token=token, role=role)
+
+
+@router.post("/logout")
+def logout(response: Response):
+    response.delete_cookie(key=AUTH_COOKIE_NAME, path="/")
+    return {"status": "ok"}
+
+
+@router.get("/me")
+def me(context: dict[str, str] = Depends(get_current_user_context)):
+    return context

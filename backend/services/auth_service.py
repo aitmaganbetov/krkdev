@@ -13,7 +13,6 @@ import hmac
 import re
 import ssl
 import site
-import subprocess
 import sys
 from urllib.parse import urlparse
 
@@ -53,20 +52,9 @@ def _import_ldap3_for_auth():
             from ldap3.core.exceptions import LDAPBindError, LDAPException, LDAPSocketOpenError
             return ALL, BASE, SUBTREE, Connection, Server, Tls, LDAPBindError, LDAPException, LDAPSocketOpenError
         except Exception:
-            install_cmds = [
-                [sys.executable, "-m", "pip", "install", "--user", "--break-system-packages", "ldap3"],
-                [sys.executable, "-m", "pip", "install", "ldap3"],
-                [sys.executable, "-m", "pip", "install", "--target", vendor_path, "ldap3"],
-            ]
-            for cmd in install_cmds:
-                try:
-                    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=35)
-                    from ldap3 import ALL, BASE, SUBTREE, Connection, Server, Tls
-                    from ldap3.core.exceptions import LDAPBindError, LDAPException, LDAPSocketOpenError
-                    return ALL, BASE, SUBTREE, Connection, Server, Tls, LDAPBindError, LDAPException, LDAPSocketOpenError
-                except Exception:
-                    continue
-            raise RuntimeError(str(first_exc)) from first_exc
+            raise RuntimeError(
+                "ldap3 dependency is unavailable. Install ldap3 during build/deploy; runtime installation is disabled."
+            ) from first_exc
 
 
 def _ensure_users_table(db) -> None:

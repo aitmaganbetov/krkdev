@@ -3,7 +3,6 @@ import os
 import site
 import socket
 import ssl
-import subprocess
 import sys
 from urllib.parse import urlparse
 
@@ -36,20 +35,9 @@ def _import_ldap3_for_settings():
             from ldap3.core.exceptions import LDAPException, LDAPSocketOpenError
             return Connection, Server, Tls, LDAPException, LDAPSocketOpenError
         except Exception:
-            install_cmds = [
-                [sys.executable, "-m", "pip", "install", "--user", "--break-system-packages", "ldap3"],
-                [sys.executable, "-m", "pip", "install", "ldap3"],
-                [sys.executable, "-m", "pip", "install", "--target", vendor_path, "ldap3"],
-            ]
-            for cmd in install_cmds:
-                try:
-                    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=35)
-                    from ldap3 import Connection, Server, Tls
-                    from ldap3.core.exceptions import LDAPException, LDAPSocketOpenError
-                    return Connection, Server, Tls, LDAPException, LDAPSocketOpenError
-                except Exception:
-                    continue
-            raise RuntimeError(str(first_exc)) from first_exc
+            raise RuntimeError(
+                "ldap3 dependency is unavailable. Install ldap3 during build/deploy; runtime installation is disabled."
+            ) from first_exc
 
 
 class LdapSettings(BaseModel):

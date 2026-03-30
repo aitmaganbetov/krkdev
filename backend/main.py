@@ -6,7 +6,10 @@ from database import engine, Base
 from routers import auth_router, catalogs_router, records_router, system_settings_router, users_router, audit_logs_router
 from services import require_roles, ROLE_ADMIN
 from services.audit_log import audit_event
-from models import AuditLog  # Ensure model is registered for create_all
+
+# Import all models to ensure they are registered with Base
+import models.record  # noqa: F401
+import models.audit_log  # noqa: F401
 
 
 def _read_csv_env(name: str, default: list[str]) -> list[str]:
@@ -31,7 +34,11 @@ CORS_ALLOW_HEADERS = _read_csv_env(
 )
 
 # Create all tables at startup (if not already created)
-Base.metadata.create_all(bind=engine)
+try:
+    Base.metadata.create_all(bind=engine)
+except Exception as e:
+    import logging
+    logging.error(f"Failed to create database tables: {e}")
 
 app = FastAPI(
     title="KRK Monitoring System API",

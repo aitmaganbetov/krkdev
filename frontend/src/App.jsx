@@ -19,6 +19,7 @@ import EditRecordPage   from './pages/EditRecordPage'
 import UsersPage        from './pages/UsersPage'
 import LdapUsersPage    from './pages/LdapUsersPage'
 import SystemSettingsPage from './pages/SystemSettingsPage'
+import AuditLogsPage    from './pages/AuditLogsPage'
 
 
 function RoleGuard({ allowedRoles, children }) {
@@ -56,6 +57,7 @@ export default function App() {
               <Route path="/users"             element={<RoleGuard allowedRoles={["admin"]}><UsersPage /></RoleGuard>} />
               <Route path="/ldap-users"        element={<RoleGuard allowedRoles={["admin"]}><LdapUsersPage /></RoleGuard>} />
               <Route path="/settings"          element={<RoleGuard allowedRoles={["admin"]}><SystemSettingsPage /></RoleGuard>} />
+              <Route path="/audit-logs"        element={<RoleGuard allowedRoles={["admin"]}><AuditLogsPage /></RoleGuard>} />
             </Route>
 
             {/* Fallback */}

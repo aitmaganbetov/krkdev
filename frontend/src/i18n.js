@@ -12,6 +12,7 @@ const resources = {
         users: 'Пользователи',
         ldapUsers: 'LDAP пользователи',
         settings: 'Настройка системы',
+        auditLogs: 'Логи аудита',
       },
       // Sidebar
       sidebar: {
@@ -329,6 +330,7 @@ const resources = {
         users: 'Пайдаланушылар',
         ldapUsers: 'LDAP пайдаланушылар',
         settings: 'Жүйе параметрлері',
+        auditLogs: 'Аудит логтары',
       },
       sidebar: {
         collapse: 'Жию',
@@ -635,6 +637,7 @@ const resources = {
         users: 'Users',
         ldapUsers: 'LDAP Users',
         settings: 'System Settings',
+        auditLogs: 'Audit Logs',
       },
       sidebar: {
         collapse: 'Collapse',

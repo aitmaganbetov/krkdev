@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from migrations import import_faculties, migrate_records_submitted_by
 import os
-from routers import auth_router, catalogs_router, records_router, system_settings_router, users_router
+from routers import auth_router, catalogs_router, records_router, system_settings_router, users_router, audit_logs_router
 from services import require_roles, ROLE_ADMIN
 from services.audit_log import audit_event
 
@@ -49,6 +49,7 @@ app.include_router(catalogs_router)
 app.include_router(records_router)
 app.include_router(system_settings_router)
 app.include_router(users_router)
+app.include_router(audit_logs_router)
 
 
 @app.get("/health")

@@ -3,6 +3,38 @@ import { useTranslation } from 'react-i18next'
 import Spinner from '../components/Spinner'
 import { formatDateTimeUtcPlus5 } from '../utils/datetime'
 
+const ACTION_LABELS = {
+  'auth.login': 'Вход в систему',
+  'auth.logout': 'Выход из системы',
+  'auth.me': 'Проверка сессии',
+  'record.create': 'Создание записи',
+  'record.update': 'Редактирование записи',
+  'record.delete': 'Удаление записи',
+  'record.submit': 'Отправка записи',
+  'record.send_to_rework': 'Возврат на доработку',
+  'record.accept': 'Принятие записи',
+  'admin.users.create': 'Создание пользователя',
+  'admin.users.update': 'Обновление пользователя',
+  'admin.users.role.update': 'Изменение роли пользователя',
+  'admin.migrate.faculties': 'Импорт факультетов',
+  'admin.migrate.records-submitted-by': 'Миграция submitted_by',
+}
+
+const OUTCOME_LABELS = {
+  success: 'Успешно',
+  failure: 'Ошибка',
+  blocked: 'Заблокировано',
+}
+
+const REASON_LABELS = {
+  rate_limited: 'Слишком много попыток входа',
+  too_many_failed_attempts: 'Превышен лимит неудачных попыток',
+  missing_credentials: 'Отсутствуют данные авторизации',
+  invalid_or_expired_token: 'Токен недействителен или истек',
+  frontend_401: 'Автоматический выход после 401',
+  manual: 'Ручной выход',
+}
+
 export default function AuditLogsPage() {
   const { t } = useTranslation()
   const [logs, setLogs] = useState([])
@@ -118,6 +150,16 @@ export default function AuditLogsPage() {
       default:
         return 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-300'
     }
+  }
+
+  const getActionLabel = (action) => ACTION_LABELS[action] || action
+
+  const getOutcomeLabel = (outcome) => OUTCOME_LABELS[outcome] || outcome
+
+  const getReasonLabel = (details) => {
+    const reason = details?.reason
+    if (!reason) return ''
+    return REASON_LABELS[reason] || reason
   }
 
   return (
@@ -271,13 +313,14 @@ export default function AuditLogsPage() {
                   <th className="px-4 py-3 text-left font-medium text-gray-700 dark:text-gray-300">Действие</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-700 dark:text-gray-300">Результат</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-700 dark:text-gray-300">Пользователь</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700 dark:text-gray-300">Причина</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-700 dark:text-gray-300">IP</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                 {logs.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-6 text-center text-gray-500 dark:text-gray-400">
+                    <td colSpan={6} className="px-4 py-6 text-center text-gray-500 dark:text-gray-400">
                       {t('common.noData')}
                     </td>
                   </tr>
@@ -285,13 +328,17 @@ export default function AuditLogsPage() {
                   logs.map((log) => (
                     <tr key={log.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                       <td className="px-4 py-3 text-xs text-gray-600 dark:text-gray-400">{formatDateTimeUtcPlus5(log.timestamp)}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-900 dark:text-gray-100">{log.action}</td>
+                      <td className="px-4 py-3 text-gray-900 dark:text-gray-100">
+                        <div className="text-sm font-medium">{getActionLabel(log.action)}</div>
+                        <div className="font-mono text-[11px] text-gray-500 dark:text-gray-400">{log.action}</div>
+                      </td>
                       <td className="px-4 py-3">
                         <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-medium ${outcomeColor(log.outcome)}`}>
-                          {log.outcome}
+                          {getOutcomeLabel(log.outcome)}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{log.actor}</td>
+                      <td className="px-4 py-3 text-xs text-gray-600 dark:text-gray-400">{getReasonLabel(log.details) || '—'}</td>
                       <td className="px-4 py-3 font-mono text-xs text-gray-600 dark:text-gray-400">{log.ip_address || '—'}</td>
                     </tr>
                   ))

@@ -4,6 +4,8 @@ from threading import Lock
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from sqlalchemy.orm import Session
+from database import get_db
 from schemas.auth import LoginRequest, TokenOut
 from services.auth_service import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
@@ -66,7 +68,7 @@ def _clear_attempts(key: str) -> None:
 
 
 @router.post("/login", response_model=TokenOut)
-def login(body: LoginRequest, request: Request, response: Response):
+def login(body: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
     now = datetime.now(timezone.utc)
     client_ip = request.client.host if request.client else "unknown"
     attempt_key = _make_attempt_key(body.username, client_ip)
@@ -78,6 +80,8 @@ def login(body: LoginRequest, request: Request, response: Response):
             outcome="blocked",
             actor=username,
             details={"ip": client_ip, "reason": "rate_limited"},
+            db=db,
+            ip_address=client_ip,
         )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -94,6 +98,8 @@ def login(body: LoginRequest, request: Request, response: Response):
                 outcome="blocked",
                 actor=username,
                 details={"ip": client_ip, "reason": "too_many_failed_attempts"},
+                db=db,
+                ip_address=client_ip,
             )
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -104,6 +110,8 @@ def login(body: LoginRequest, request: Request, response: Response):
             outcome="failure",
             actor=username,
             details={"ip": client_ip, "source": source},
+            db=db,
+            ip_address=client_ip,
         )
         detail = "Invalid username or password"
         if source == "ldap_unavailable":
@@ -119,6 +127,8 @@ def login(body: LoginRequest, request: Request, response: Response):
         outcome="success",
         actor=normalized_username,
         details={"ip": client_ip, "role": role, "source": source},
+        db=db,
+        ip_address=client_ip,
     )
     token = create_access_token({"sub": normalized_username, "role": role, "auth_source": source})
     response.set_cookie(

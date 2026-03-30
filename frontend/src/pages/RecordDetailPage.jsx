@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext'
 import Spinner from '../components/Spinner'
 import StatusBadge from '../components/StatusBadge'
 import { isSameIdentity } from '../utils/identity'
+import { formatDateTimeUtcPlus5 } from '../utils/datetime'
 
 const RATING_KEYS = [
   '1.1','1.2','1.3','1.4','1.5','1.6','1.7',
@@ -243,7 +244,7 @@ export default function RecordDetailPage() {
                 [t('record.submittedBy'), record.submitted_by_display || record.submitted_by || '—'],
                 [t('record.reviewedBy'), record.reviewed_by_display || record.reviewed_by || '—'],
                 [t('record.academicYear'), record.academic_year],
-                [t('record.date'), new Date(record.datetime).toLocaleString('ru-RU')],
+                [t('record.date'), formatDateTimeUtcPlus5(record.datetime)],
               ].map(([k, v]) => (
                 <div key={k} className="flex gap-2 print:block">
                   <dt className="text-gray-400 w-28 flex-shrink-0 print:w-auto print:mb-1">{k}:</dt>

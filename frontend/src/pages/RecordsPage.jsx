@@ -5,6 +5,7 @@ import { getRecords, deleteRecord } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import Spinner from '../components/Spinner'
 import StatusBadge from '../components/StatusBadge'
+import { formatDateUtcPlus5 } from '../utils/datetime'
 
 const LIMIT = 20
 
@@ -151,7 +152,7 @@ export default function RecordsPage() {
                     <span>{r.group_name}</span>
                     <span>{r.lesson_type}</span>
                     <span>{r.attendance.toFixed(0)}% {t('records.attendance').replace(' %','')}</span>
-                    <span>{new Date(r.datetime).toLocaleDateString('ru-RU')}</span>
+                    <span>{formatDateUtcPlus5(r.datetime)}</span>
                   </div>
                   {canManageRecords && (
                     <div className="mt-2 flex gap-3 text-xs">
@@ -224,7 +225,7 @@ export default function RecordsPage() {
                       <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{r.submitted_by_display || r.submitted_by || '—'}</td>
                       <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
                       <td className="px-4 py-3 text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                        {new Date(r.datetime).toLocaleDateString('ru-RU')}
+                        {formatDateUtcPlus5(r.datetime)}
                       </td>
                       <td className="px-4 py-3">
                         {canManageRecords ? (

@@ -14,6 +14,7 @@ import {
   getRecordFormStepError,
   normalizeRatingsForForm,
 } from '../utils/recordForm'
+import { datetimeLocalToIsoUtcPlus5, toDatetimeLocalUtcPlus5 } from '../utils/datetime'
 
 const EDITABLE_FIELDS = [
   'teacher',
@@ -51,8 +52,7 @@ export default function EditRecordPage() {
   useEffect(() => {
     getRecord(id)
       .then((r) => {
-        // Normalize datetime for datetime-local input
-        const dt = r.datetime ? r.datetime.slice(0, 16) : ''
+        const dt = toDatetimeLocalUtcPlus5(r.datetime)
         setData({
           ...r,
           datetime: dt,
@@ -106,7 +106,13 @@ export default function EditRecordPage() {
       const payload = Object.fromEntries(
         EDITABLE_FIELDS.map((field) => [field, data[field]])
       )
-      payload.datetime = new Date(data.datetime).toISOString()
+      const datetimeIso = datetimeLocalToIsoUtcPlus5(data.datetime)
+      if (!datetimeIso) {
+        setError(t('common.error'))
+        setSaving(false)
+        return
+      }
+      payload.datetime = datetimeIso
 
       await updateRecord(id, payload)
       navigate(`/records/${id}`, { state: { notice: t('common.savedOk') } })

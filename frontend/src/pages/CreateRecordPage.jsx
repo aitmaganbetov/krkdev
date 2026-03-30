@@ -10,6 +10,7 @@ import Step3Ratings  from '../components/form/Step3Ratings'
 import Step4Review   from '../components/form/Step4Review'
 import Spinner from '../components/Spinner'
 import { createEmptyRatings, getRecordFormError, getRecordFormStepError } from '../utils/recordForm'
+import { datetimeLocalToIsoUtcPlus5 } from '../utils/datetime'
 
 function createInitial() {
   return {
@@ -77,9 +78,16 @@ export default function CreateRecordPage() {
     setSaving(true)
     setError('')
     try {
+      const datetimeIso = datetimeLocalToIsoUtcPlus5(data.datetime)
+      if (!datetimeIso) {
+        setError(t('common.error'))
+        setSaving(false)
+        return
+      }
+
       const payload = {
         ...data,
-        datetime: new Date(data.datetime).toISOString(),
+        datetime: datetimeIso,
       }
       delete payload.submitted_by
       const created = await createRecord(payload)

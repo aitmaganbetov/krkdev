@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { formatDateTimeUtcPlus5 } from '../../utils/datetime'
 
 export default function Step4Review({ data, onChange }) {
   const { t } = useTranslation()
@@ -21,7 +22,7 @@ export default function Step4Review({ data, onChange }) {
     [t('steps.reviewLessonType'), data.lesson_type],
     [t('steps.reviewFormat'), data.format],
     [t('steps.reviewTopic'), data.topic],
-    [t('steps.reviewDateTime'), data.datetime ? new Date(data.datetime).toLocaleString('ru-RU') : '—'],
+    [t('steps.reviewDateTime'), data.datetime ? formatDateTimeUtcPlus5(data.datetime) : '—'],
     [t('steps.reviewYear'), data.academic_year],
     [t('steps.reviewStudents'), `${data.students_plan} / ${data.students_fact}`],
     [t('steps.reviewAttendance'), `${attendance}%`],

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import Spinner from '../components/Spinner'
+import { formatDateTimeUtcPlus5 } from '../utils/datetime'
 
 export default function AuditLogsPage() {
   const { t } = useTranslation()
@@ -103,15 +104,6 @@ export default function AuditLogsPage() {
       }
     } catch (err) {
       console.error('Error loading filters:', err)
-    }
-  }
-
-  const formatDate = (isoString) => {
-    try {
-      const date = new Date(isoString)
-      return date.toLocaleString()
-    } catch {
-      return isoString
     }
   }
 
@@ -292,7 +284,7 @@ export default function AuditLogsPage() {
                 ) : (
                   logs.map((log) => (
                     <tr key={log.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                      <td className="px-4 py-3 text-xs text-gray-600 dark:text-gray-400">{formatDate(log.timestamp)}</td>
+                      <td className="px-4 py-3 text-xs text-gray-600 dark:text-gray-400">{formatDateTimeUtcPlus5(log.timestamp)}</td>
                       <td className="px-4 py-3 font-mono text-xs text-gray-900 dark:text-gray-100">{log.action}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-medium ${outcomeColor(log.outcome)}`}>

@@ -55,12 +55,12 @@ app.add_middleware(
     allow_headers=CORS_ALLOW_HEADERS,
 )
 
-app.include_router(auth_router)
-app.include_router(catalogs_router)
-app.include_router(records_router)
-app.include_router(system_settings_router)
-app.include_router(users_router)
-app.include_router(audit_logs_router)
+app.include_router(auth_router, prefix="/api")
+app.include_router(catalogs_router, prefix="/api")
+app.include_router(records_router, prefix="/api")
+app.include_router(system_settings_router, prefix="/api")
+app.include_router(users_router, prefix="/api")
+app.include_router(audit_logs_router, prefix="/api")
 
 
 @app.get("/health")

@@ -1,24 +1,8 @@
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from database import engine, Base
-from sqlalchemy import inspect, text
-import models  # noqa: F401 — ensures models are registered before create_all
+from migrations import import_faculties, migrate_records_submitted_by
 from routers import auth_router, catalogs_router, records_router, system_settings_router, users_router
-from migrations import import_faculties
 from services import require_roles, ROLE_ADMIN
-
-Base.metadata.create_all(bind=engine)
-
-
-def ensure_records_schema():
-    inspector = inspect(engine)
-    columns = {col["name"] for col in inspector.get_columns("records")}
-    if "submitted_by" not in columns:
-        with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE records ADD COLUMN submitted_by VARCHAR(255) NULL"))
-
-
-ensure_records_schema()
 
 app = FastAPI(
     title="KRK Monitoring System API",
@@ -50,3 +34,9 @@ def health():
 def migrate_faculties(_: dict = Depends(require_roles(ROLE_ADMIN))):
     """Admin endpoint to import faculties from remote database"""
     return import_faculties()
+
+
+@app.post("/admin/migrate/records-submitted-by")
+def migrate_records_submitted_by_column(_: dict = Depends(require_roles(ROLE_ADMIN))):
+    """Admin endpoint to add records.submitted_by column if needed"""
+    return migrate_records_submitted_by()

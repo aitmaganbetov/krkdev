@@ -26,6 +26,16 @@ function parseToDate(value) {
     return parseDatetimeLocal(value)
   }
 
+  if (typeof value === 'string') {
+    const normalized = value.includes(' ') ? value.replace(' ', 'T') : value
+    const isIsoLike = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?$/.test(normalized)
+    const hasTimezone = /Z$|[+-]\d{2}:\d{2}$/.test(normalized)
+    if (isIsoLike && !hasTimezone) {
+      const utcDate = new Date(`${normalized}Z`)
+      if (!Number.isNaN(utcDate.getTime())) return utcDate
+    }
+  }
+
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return null
   return date

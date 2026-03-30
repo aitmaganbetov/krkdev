@@ -18,10 +18,19 @@ function parseJwtPayload(token) {
 }
 
 function getInitialAuthState() {
+  const token = localStorage.getItem('token') || ''
   const storedUsername = localStorage.getItem('username') || ''
   const storedRole = (localStorage.getItem('role') || '').toLowerCase()
-  const currentUser = normalizeIdentity(storedUsername)
-  const role = storedRole || 'staff'
+  const payload = parseJwtPayload(token)
+  const usernameFromToken = normalizeIdentity(payload?.sub)
+  const roleFromToken = String(payload?.role || '').toLowerCase().trim()
+  const currentUser = usernameFromToken || normalizeIdentity(storedUsername)
+  const role = roleFromToken || storedRole || 'staff'
+
+  if (currentUser) {
+    localStorage.setItem('username', currentUser)
+    localStorage.setItem('role', role)
+  }
 
   return {
     currentUser,
@@ -51,11 +60,24 @@ export function AuthProvider({ children }) {
       })
       .catch(() => {
         if (!mounted) return
-        setCurrentUser('')
-        setRole('staff')
-        setIsAuthenticated(false)
-        localStorage.removeItem('username')
-        localStorage.removeItem('role')
+        // Backward compatibility for backends without /auth/me cookie endpoint.
+        const token = localStorage.getItem('token') || ''
+        const payload = parseJwtPayload(token)
+        const user = normalizeIdentity(payload?.sub) || normalizeIdentity(localStorage.getItem('username') || '')
+        const nextRole = String(payload?.role || localStorage.getItem('role') || 'staff').toLowerCase()
+        if (user) {
+          setCurrentUser(user)
+          setRole(nextRole)
+          setIsAuthenticated(true)
+          localStorage.setItem('username', user)
+          localStorage.setItem('role', nextRole)
+        } else {
+          setCurrentUser('')
+          setRole('staff')
+          setIsAuthenticated(false)
+          localStorage.removeItem('username')
+          localStorage.removeItem('role')
+        }
       })
       .finally(() => {
         if (mounted) setAuthLoading(false)
@@ -72,6 +94,7 @@ export function AuthProvider({ children }) {
     const canonicalUser = normalizeIdentity(payload?.sub) || normalizeIdentity(username)
     const roleFromToken = String(payload?.role || data.role || 'staff').toLowerCase()
 
+    localStorage.setItem('token', data.access_token)
     localStorage.setItem('username', canonicalUser)
     localStorage.setItem('role', roleFromToken)
     setCurrentUser(canonicalUser)
@@ -81,6 +104,7 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(() => {
     logoutApi().catch(() => {})
+    localStorage.removeItem('token')
     localStorage.removeItem('username')
     localStorage.removeItem('role')
     setCurrentUser('')

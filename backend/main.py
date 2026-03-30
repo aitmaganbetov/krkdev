@@ -6,6 +6,7 @@ import models  # noqa: F401 — ensures models are registered before create_all
 from routers import auth_router, catalogs_router, records_router, system_settings_router, users_router
 from migrations import import_faculties
 from services import require_roles, ROLE_ADMIN
+from services.audit_log import audit_event
 
 Base.metadata.create_all(bind=engine)
 
@@ -47,6 +48,14 @@ def health():
     return {"status": "ok"}
 
 @app.post("/admin/migrate/faculties")
-def migrate_faculties(_: dict = Depends(require_roles(ROLE_ADMIN))):
+def migrate_faculties(context: dict = Depends(require_roles(ROLE_ADMIN))):
     """Admin endpoint to import faculties from remote database"""
-    return import_faculties()
+    result = import_faculties()
+    outcome = "success" if result.get("status") == "success" else "failure"
+    audit_event(
+        action="admin.migrate.faculties",
+        outcome=outcome,
+        actor=context.get("username"),
+        details={"status": result.get("status"), "count": result.get("count")},
+    )
+    return result

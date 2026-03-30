@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 from database import get_db
 from services import ROLE_ADMIN, get_current_user, require_roles
+from services.audit_log import audit_event
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -537,7 +538,7 @@ def update_local_user_role(
     username: str,
     body: UserRoleUpdateIn,
     db: Session = Depends(get_db),
-    _: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+    context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
 ):
     role = _validate_role(body.role)
 
@@ -568,9 +569,21 @@ def update_local_user_role(
         if not row:
             raise HTTPException(status_code=404, detail="Пользователь не найден")
 
+        audit_event(
+            action="admin.users.role.update",
+            outcome="success",
+            actor=context.get("username"),
+            details={"target": username.strip().lower(), "role": role},
+        )
         return _map_cached_user_row(row)
     except SQLAlchemyError as exc:
         db.rollback()
+        audit_event(
+            action="admin.users.role.update",
+            outcome="failure",
+            actor=context.get("username"),
+            details={"target": username.strip().lower(), "error": type(exc).__name__},
+        )
         raise HTTPException(status_code=500, detail="Не удалось обновить роль пользователя") from exc
 
 
@@ -578,7 +591,7 @@ def update_local_user_role(
 def create_local_user(
     body: LocalUserCreateIn,
     db: Session = Depends(get_db),
-    _: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+    context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
 ):
     username = _normalize_username(body.username)
     if not username:
@@ -629,12 +642,30 @@ def create_local_user(
         row = _fetch_local_user_row(db, username)
         if not row:
             raise HTTPException(status_code=500, detail="Пользователь создан, но не найден")
+        audit_event(
+            action="admin.users.create",
+            outcome="success",
+            actor=context.get("username"),
+            details={"target": username, "role": role},
+        )
         return _map_cached_user_row(row)
     except HTTPException:
         db.rollback()
+        audit_event(
+            action="admin.users.create",
+            outcome="failure",
+            actor=context.get("username"),
+            details={"target": username, "reason": "validation_or_conflict"},
+        )
         raise
     except SQLAlchemyError as exc:
         db.rollback()
+        audit_event(
+            action="admin.users.create",
+            outcome="failure",
+            actor=context.get("username"),
+            details={"target": username, "error": type(exc).__name__},
+        )
         raise HTTPException(status_code=500, detail="Не удалось создать пользователя") from exc
 
 
@@ -643,7 +674,7 @@ def update_local_user(
     username: str,
     body: LocalUserUpdateIn,
     db: Session = Depends(get_db),
-    _: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+    context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
 ):
     normalized = _normalize_username(username)
     if not normalized:
@@ -698,10 +729,28 @@ def update_local_user(
         row = _fetch_local_user_row(db, normalized)
         if not row:
             raise HTTPException(status_code=404, detail="Пользователь не найден")
+        audit_event(
+            action="admin.users.update",
+            outcome="success",
+            actor=context.get("username"),
+            details={"target": normalized, "updated_fields": sorted(list(updates.keys()) + (["role"] if role is not None else []))},
+        )
         return _map_cached_user_row(row)
     except HTTPException:
         db.rollback()
+        audit_event(
+            action="admin.users.update",
+            outcome="failure",
+            actor=context.get("username"),
+            details={"target": normalized, "reason": "validation_or_not_found"},
+        )
         raise
     except SQLAlchemyError as exc:
         db.rollback()
+        audit_event(
+            action="admin.users.update",
+            outcome="failure",
+            actor=context.get("username"),
+            details={"target": normalized, "error": type(exc).__name__},
+        )
         raise HTTPException(status_code=500, detail="Не удалось обновить пользователя") from exc

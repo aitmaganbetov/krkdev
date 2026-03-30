@@ -2,9 +2,11 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from migrations import import_faculties, migrate_records_submitted_by
 import os
+from database import engine, Base
 from routers import auth_router, catalogs_router, records_router, system_settings_router, users_router, audit_logs_router
 from services import require_roles, ROLE_ADMIN
 from services.audit_log import audit_event
+from models import AuditLog  # Ensure model is registered for create_all
 
 
 def _read_csv_env(name: str, default: list[str]) -> list[str]:
@@ -28,6 +30,8 @@ CORS_ALLOW_HEADERS = _read_csv_env(
     ["Authorization", "Content-Type"],
 )
 
+# Create all tables at startup (if not already created)
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="KRK Monitoring System API",

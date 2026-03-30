@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import AuditLog
 from services import require_roles, ROLE_ADMIN
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 router = APIRouter(prefix="/admin/audit-logs", tags=["admin-audit-logs"])
 
@@ -23,7 +23,7 @@ def list_audit_logs(
     query = db.query(AuditLog)
     
     # Filter by date
-    cutoff = datetime.utcnow() - timedelta(days=days_back)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
     query = query.filter(AuditLog.timestamp >= cutoff)
     
     # Apply optional filters
@@ -55,7 +55,7 @@ def audit_logs_stats(
     db: Session = Depends(get_db),
 ):
     """Get statistics about audit logs"""
-    cutoff = datetime.utcnow() - timedelta(days=days_back)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
     
     query = db.query(AuditLog).filter(AuditLog.timestamp >= cutoff)
     

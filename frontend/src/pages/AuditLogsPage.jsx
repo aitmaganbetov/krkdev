@@ -40,13 +40,17 @@ export default function AuditLogsPage() {
         credentials: 'include',
         headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` }
       })
-      if (!response.ok) throw new Error(t('common.error'))
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }))
+        throw new Error(errorData.detail || `HTTP ${response.status}`)
+      }
       const data = await response.json()
       setLogs(data.logs || [])
       setTotal(data.total || 0)
       setError(null)
     } catch (err) {
-      setError(err.message)
+      console.error('Error loading logs:', err)
+      setError(err.message || t('common.error'))
     } finally {
       setLoading(false)
     }
@@ -237,8 +241,9 @@ export default function AuditLogsPage() {
 
       {/* Logs Table */}
       {error && (
-        <div className="rounded-lg bg-red-50 dark:bg-red-900/20 p-4 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300">
-          {error}
+        <div className="rounded-lg bg-red-50 dark:bg-red-900/20 p-4 border border-red-200 dark:border-red-800">
+          <p className="text-red-700 dark:text-red-300 font-medium mb-2">Ошибка при загрузке логов:</p>
+          <p className="text-red-600 dark:text-red-400 text-sm">{error}</p>
         </div>
       )}
 

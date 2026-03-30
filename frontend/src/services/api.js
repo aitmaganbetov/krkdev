@@ -20,10 +20,18 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
+      const requestUrl = String(error.config?.url || '')
+      const isAuthProbe = requestUrl.includes('/auth/me')
+      const isLoginPage = typeof window !== 'undefined' && window.location.pathname === '/login'
+
       localStorage.removeItem('token')
       localStorage.removeItem('username')
       localStorage.removeItem('role')
-      window.location.href = '/login'
+
+      // Avoid infinite reload loop on /login caused by /auth/me returning 401.
+      if (!isAuthProbe && !isLoginPage && typeof window !== 'undefined') {
+        window.location.replace('/login')
+      }
     }
     return Promise.reject(error)
   }

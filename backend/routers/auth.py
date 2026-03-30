@@ -144,11 +144,34 @@ def login(body: LoginRequest, request: Request, response: Response, db: Session 
 
 
 @router.post("/logout")
-def logout(response: Response):
+def logout(
+    request: Request,
+    response: Response,
+    context: dict[str, str] = Depends(get_current_user_context),
+    db: Session = Depends(get_db),
+):
+    client_ip = request.client.host if request.client else "unknown"
+    audit_event(
+        action="auth.logout",
+        outcome="success",
+        actor=context.get("username"),
+        details={"ip": client_ip, "role": context.get("role"), "source": context.get("auth_source")},
+        db=db,
+        ip_address=client_ip,
+    )
     response.delete_cookie(key=AUTH_COOKIE_NAME, path="/")
     return {"status": "ok"}
 
 
 @router.get("/me")
-def me(context: dict[str, str] = Depends(get_current_user_context)):
+def me(request: Request, context: dict[str, str] = Depends(get_current_user_context), db: Session = Depends(get_db)):
+    client_ip = request.client.host if request.client else "unknown"
+    audit_event(
+        action="auth.me",
+        outcome="success",
+        actor=context.get("username"),
+        details={"ip": client_ip, "role": context.get("role"), "source": context.get("auth_source")},
+        db=db,
+        ip_address=client_ip,
+    )
     return context

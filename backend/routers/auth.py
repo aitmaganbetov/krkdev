@@ -6,6 +6,7 @@ import os
 from fastapi import APIRouter, HTTPException, Request, status
 from schemas.auth import LoginRequest, TokenOut
 from services.auth_service import authenticate_user_details, create_access_token
+from services.audit_log import audit_event
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -61,8 +62,15 @@ def login(body: LoginRequest, request: Request):
     now = datetime.now(timezone.utc)
     client_ip = request.client.host if request.client else "unknown"
     attempt_key = _make_attempt_key(body.username, client_ip)
+    username = (body.username or "").strip().lower()
 
     if _is_blocked(attempt_key, now):
+        audit_event(
+            action="auth.login",
+            outcome="blocked",
+            actor=username,
+            details={"ip": client_ip, "reason": "rate_limited"},
+        )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many login attempts. Try again later.",
@@ -73,10 +81,22 @@ def login(body: LoginRequest, request: Request):
     if not authenticated:
         blocked = _register_failed_attempt(attempt_key, now)
         if blocked:
+            audit_event(
+                action="auth.login",
+                outcome="blocked",
+                actor=username,
+                details={"ip": client_ip, "reason": "too_many_failed_attempts"},
+            )
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Too many login attempts. Try again later.",
             )
+        audit_event(
+            action="auth.login",
+            outcome="failure",
+            actor=username,
+            details={"ip": client_ip, "source": source},
+        )
         detail = "Invalid username or password"
         if source == "ldap_unavailable":
             detail = "LDAP недоступен. Вход возможен только для ранее авторизованных пользователей."
@@ -86,5 +106,11 @@ def login(body: LoginRequest, request: Request):
         )
 
     _clear_attempts(attempt_key)
+    audit_event(
+        action="auth.login",
+        outcome="success",
+        actor=normalized_username,
+        details={"ip": client_ip, "role": role, "source": source},
+    )
     token = create_access_token({"sub": normalized_username, "role": role, "auth_source": source})
     return TokenOut(access_token=token, role=role)

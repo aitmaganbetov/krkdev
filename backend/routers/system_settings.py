@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from services import ROLE_ADMIN, require_roles
+from services.audit_log import audit_event
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -117,7 +118,7 @@ def get_ldap_settings(
 def save_ldap_settings(
     body: LdapSettings,
     db: Session = Depends(get_db),
-    _: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+    context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
 ):
     try:
         _ensure_settings_table(db)
@@ -132,23 +133,47 @@ def save_ldap_settings(
             {"value_text": json.dumps(payload, ensure_ascii=False)},
         )
         db.commit()
+        audit_event(
+            action="admin.settings.ldap.save",
+            outcome="success",
+            actor=context.get("username"),
+            details={"has_server_url": bool((body.server_url or "").strip())},
+        )
         return body
     except SQLAlchemyError as exc:
         db.rollback()
+        audit_event(
+            action="admin.settings.ldap.save",
+            outcome="failure",
+            actor=context.get("username"),
+            details={"error": type(exc).__name__},
+        )
         raise HTTPException(status_code=500, detail="Не удалось сохранить LDAP настройки") from exc
 
 
 @router.post("/ldap/test", response_model=LdapTestResult)
 def test_ldap_settings(
     body: LdapSettings,
-    _: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+    context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
 ):
     try:
         host, port, use_ssl = _parse_ldap_server_url(body.server_url)
     except ValueError as exc:
+        audit_event(
+            action="admin.settings.ldap.test",
+            outcome="failure",
+            actor=context.get("username"),
+            details={"reason": "invalid_server_url"},
+        )
         return LdapTestResult(success=False, message="Некорректный URL LDAP сервера", details=str(exc))
 
     if not body.base_dn.strip() or not body.bind_dn.strip() or not body.bind_password:
+        audit_event(
+            action="admin.settings.ldap.test",
+            outcome="failure",
+            actor=context.get("username"),
+            details={"reason": "missing_required_fields", "host": host, "port": port, "use_ssl": use_ssl},
+        )
         return LdapTestResult(
             success=False,
             message="Для теста укажите Base DN, Bind DN и пароль AD",
@@ -174,6 +199,12 @@ def test_ldap_settings(
                 tls_details = f"{host}:{port}, cipher={cipher_name}"
 
     except Exception as exc:  # pragma: no cover - network dependent
+        audit_event(
+            action="admin.settings.ldap.test",
+            outcome="failure",
+            actor=context.get("username"),
+            details={"reason": "tls_connection_failed", "host": host, "port": port, "use_ssl": use_ssl, "error": type(exc).__name__},
+        )
         return LdapTestResult(
             success=False,
             message="Тест LDAP подключения не пройден",
@@ -184,6 +215,12 @@ def test_ldap_settings(
         Connection, Server, Tls, LDAPException, LDAPSocketOpenError = _import_ldap3_for_settings()
         ldap_errors = (LDAPSocketOpenError, LDAPException, OSError)
     except Exception as exc:
+        audit_event(
+            action="admin.settings.ldap.test",
+            outcome="failure",
+            actor=context.get("username"),
+            details={"reason": "ldap_client_unavailable", "error": type(exc).__name__},
+        )
         return LdapTestResult(
             success=False,
             message="LDAP клиент недоступен",
@@ -208,18 +245,36 @@ def test_ldap_settings(
             size_limit=1,
         )
         conn.unbind()
+        audit_event(
+            action="admin.settings.ldap.test",
+            outcome="success",
+            actor=context.get("username"),
+            details={"host": host, "port": port, "use_ssl": use_ssl},
+        )
         return LdapTestResult(
             success=True,
             message="LDAP bind выполнен успешно",
             details=tls_details or f"{host}:{port}",
         )
     except ldap_errors as exc:
+        audit_event(
+            action="admin.settings.ldap.test",
+            outcome="failure",
+            actor=context.get("username"),
+            details={"reason": "ldap_bind_failed", "host": host, "port": port, "use_ssl": use_ssl, "error": type(exc).__name__},
+        )
         return LdapTestResult(
             success=False,
             message="LDAP bind не выполнен",
             details=str(exc),
         )
     except Exception as exc:
+        audit_event(
+            action="admin.settings.ldap.test",
+            outcome="failure",
+            actor=context.get("username"),
+            details={"reason": "ldap_client_exception", "host": host, "port": port, "use_ssl": use_ssl, "error": type(exc).__name__},
+        )
         return LdapTestResult(
             success=False,
             message="LDAP клиент недоступен",

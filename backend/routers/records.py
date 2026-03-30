@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -14,6 +14,7 @@ from services import (
     record_service,
     require_roles,
 )
+from services.audit_log import audit_event
 
 router = APIRouter(prefix="/records", tags=["records"])
 
@@ -98,10 +99,37 @@ def list_records(
 @router.post("", response_model=RecordOut, status_code=201)
 def create_record(
     body: RecordCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR, ROLE_STAFF)),
 ):
-    return record_service.create_record(db, body, submitted_by=current_user["username"])
+    try:
+        record = record_service.create_record(db, body, submitted_by=current_user["username"])
+        audit_event(
+            action="record.create",
+            outcome="success",
+            actor=current_user["username"],
+            details={
+                "record_id": record.id,
+                "teacher": record.teacher,
+                "subject": record.subject,
+                "group": record.group_name,
+                "status": record.status,
+            },
+            db=db,
+            ip_address=request.client.host if request.client else None,
+        )
+        return record
+    except Exception as e:
+        audit_event(
+            action="record.create",
+            outcome="failure",
+            actor=current_user["username"],
+            details={"error": str(e), "teacher": getattr(body, 'teacher', None)},
+            db=db,
+            ip_address=request.client.host if request.client else None,
+        )
+        raise
 
 
 @router.get("/{record_id}", response_model=RecordOut)
@@ -126,90 +154,222 @@ def get_record(
 def update_record(
     record_id: int,
     body: RecordUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR, ROLE_STAFF)),
 ):
-    return record_service.update_record(
-        db, record_id, body, 
-        updated_by=current_user["username"],
-        user_role=current_user["role"]
-    )
+    try:
+        result = record_service.update_record(
+            db, record_id, body, 
+            updated_by=current_user["username"],
+            user_role=current_user["role"]
+        )
+        audit_event(
+            action="record.update",
+            outcome="success",
+            actor=current_user["username"],
+            details={
+                "record_id": record_id,
+                "teacher": result.teacher,
+                "subject": result.subject,
+                "status": result.status,
+                "changed_fields": list(body.dict(exclude_unset=True).keys()),
+            },
+            db=db,
+            ip_address=request.client.host if request.client else None,
+        )
+        return result
+    except Exception as e:
+        audit_event(
+            action="record.update",
+            outcome="failure",
+            actor=current_user["username"],
+            details={"record_id": record_id, "error": str(e)},
+            db=db,
+            ip_address=request.client.host if request.client else None,
+        )
+        raise
 
 
 @router.delete("/{record_id}", status_code=204)
 def delete_record(
     record_id: int,
+    request: Request,
     db: Session = Depends(get_db),
-    _: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
+    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
 ):
-    record_service.delete_record(db, record_id)
+    try:
+        record_service.delete_record(db, record_id)
+        audit_event(
+            action="record.delete",
+            outcome="success",
+            actor=current_user["username"],
+            details={"record_id": record_id},
+            db=db,
+            ip_address=request.client.host if request.client else None,
+        )
+    except Exception as e:
+        audit_event(
+            action="record.delete",
+            outcome="failure",
+            actor=current_user["username"],
+            details={"record_id": record_id, "error": str(e)},
+            db=db,
+            ip_address=request.client.host if request.client else None,
+        )
+        raise
 
 
 @router.post("/{record_id}/submit", response_model=RecordOut)
 def submit_record(
     record_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: dict[str, str] = Depends(require_roles(ROLE_STAFF)),
 ):
     """Staff submits their record"""
-    record = record_service.get_record_by_id(db, record_id)
-    
-    # Only owner can submit (if already assigned) or self-submit (if not assigned)
-    if record.submitted_by and not _is_owner(record.submitted_by, current_user["username"]):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Can only submit your own records")
-    
-    # Only draft or rework records can be submitted
-    if record.status not in ["draft", "rework"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only draft or rework records can be submitted")
-    
-    # Set submitted_by on first submission
-    if not record.submitted_by:
-        record.submitted_by = current_user["username"]
-    
-    record.status = "submitted"
-    record.submitted_at = datetime.utcnow()
-    db.commit()
-    db.refresh(record)
-    return record
+    try:
+        record = record_service.get_record_by_id(db, record_id)
+        
+        # Only owner can submit (if already assigned) or self-submit (if not assigned)
+        if record.submitted_by and not _is_owner(record.submitted_by, current_user["username"]):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Can only submit your own records")
+        
+        # Only draft or rework records can be submitted
+        if record.status not in ["draft", "rework"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only draft or rework records can be submitted")
+        
+        # Set submitted_by on first submission
+        if not record.submitted_by:
+            record.submitted_by = current_user["username"]
+        
+        record.status = "submitted"
+        record.submitted_at = datetime.utcnow()
+        db.commit()
+        db.refresh(record)
+        
+        audit_event(
+            action="record.submit",
+            outcome="success",
+            actor=current_user["username"],
+            details={
+                "record_id": record_id,
+                "teacher": record.teacher,
+                "subject": record.subject,
+                "status": record.status,
+            },
+            db=db,
+            ip_address=request.client.host if request.client else None,
+        )
+        return record
+    except HTTPException:
+        raise
+    except Exception as e:
+        audit_event(
+            action="record.submit",
+            outcome="failure",
+            actor=current_user["username"],
+            details={"record_id": record_id, "error": str(e)},
+            db=db,
+            ip_address=request.client.host if request.client else None,
+        )
+        raise
 
 
 @router.post("/{record_id}/send-to-rework", response_model=RecordOut)
 def send_to_rework(
     record_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
 ):
     """Admin/Inspector sends record back to rework"""
-    record = record_service.get_record_by_id(db, record_id)
-    
-    # Can only send submitted records to rework
-    if record.status != "submitted":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only submitted records can be sent to rework")
-    
-    record.status = "rework"
-    record.reviewed_by = current_user["username"]
-    record.reviewed_at = datetime.utcnow()
-    db.commit()
-    db.refresh(record)
-    return record
+    try:
+        record = record_service.get_record_by_id(db, record_id)
+        
+        # Can only send submitted records to rework
+        if record.status != "submitted":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only submitted records can be sent to rework")
+        
+        record.status = "rework"
+        record.reviewed_by = current_user["username"]
+        record.reviewed_at = datetime.utcnow()
+        db.commit()
+        db.refresh(record)
+        
+        audit_event(
+            action="record.send-to-rework",
+            outcome="success",
+            actor=current_user["username"],
+            details={
+                "record_id": record_id,
+                "submitted_by": record.submitted_by,
+                "teacher": record.teacher,
+                "subject": record.subject,
+            },
+            db=db,
+            ip_address=request.client.host if request.client else None,
+        )
+        return record
+    except HTTPException:
+        raise
+    except Exception as e:
+        audit_event(
+            action="record.send-to-rework",
+            outcome="failure",
+            actor=current_user["username"],
+            details={"record_id": record_id, "error": str(e)},
+            db=db,
+            ip_address=request.client.host if request.client else None,
+        )
+        raise
 
 
 @router.post("/{record_id}/accept", response_model=RecordOut)
 def accept_record(
     record_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
 ):
     """Admin/Inspector accepts record"""
-    record = record_service.get_record_by_id(db, record_id)
-    
-    # Can only accept submitted or rework records
-    if record.status not in ["submitted", "rework"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only submitted or rework records can be accepted")
-    
-    record.status = "accepted"
-    record.reviewed_by = current_user["username"]
-    record.reviewed_at = datetime.utcnow()
-    db.commit()
-    db.refresh(record)
-    return record
+    try:
+        record = record_service.get_record_by_id(db, record_id)
+        
+        # Can only accept submitted or rework records
+        if record.status not in ["submitted", "rework"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only submitted or rework records can be accepted")
+        
+        record.status = "accepted"
+        record.reviewed_by = current_user["username"]
+        record.reviewed_at = datetime.utcnow()
+        db.commit()
+        db.refresh(record)
+        
+        audit_event(
+            action="record.accept",
+            outcome="success",
+            actor=current_user["username"],
+            details={
+                "record_id": record_id,
+                "submitted_by": record.submitted_by,
+                "teacher": record.teacher,
+                "subject": record.subject,
+                "status": record.status,
+            },
+            db=db,
+            ip_address=request.client.host if request.client else None,
+        )
+        return record
+    except HTTPException:
+        raise
+    except Exception as e:
+        audit_event(
+            action="record.accept",
+            outcome="failure",
+            actor=current_user["username"],
+            details={"record_id": record_id, "error": str(e)},
+            db=db,
+            ip_address=request.client.host if request.client else None,
+        )
+        raise

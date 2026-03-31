@@ -67,7 +67,7 @@ export default function LoginPage() {
             <input
               type="text"
               className="input"
-              placeholder="Логин от Platonus"
+              placeholder="Логин и пароль от Platonus"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required

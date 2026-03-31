@@ -816,6 +816,74 @@ def update_local_user(
         raise HTTPException(status_code=500, detail="Не удалось обновить пользователя") from exc
 
 
+@router.delete("/local/{username}")
+def delete_local_user(
+    username: str,
+    db: Session = Depends(get_db),
+    context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+):
+    normalized = _normalize_username(username)
+    actor = _normalize_username(context.get("username") or "")
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Некорректный логин")
+    if normalized == actor:
+        raise HTTPException(status_code=400, detail="Нельзя удалить самого себя")
+
+    try:
+        _ensure_users_table(db)
+
+        target = db.execute(
+            text("""
+                SELECT u.id, COALESCE(r.name, 'staff') AS role
+                FROM users u
+                LEFT JOIN roles r ON r.id = u.role_id
+                WHERE u.username = :username
+                LIMIT 1
+            """),
+            {"username": normalized},
+        ).mappings().first()
+        if not target:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+        if (target.get("role") or "staff") == "admin":
+            admins_count = db.execute(
+                text("""
+                    SELECT COUNT(*)
+                    FROM users u
+                    LEFT JOIN roles r ON r.id = u.role_id
+                    WHERE COALESCE(r.name, 'staff') = 'admin'
+                """),
+            ).scalar() or 0
+            if int(admins_count) <= 1:
+                raise HTTPException(status_code=400, detail="Нельзя удалить последнего администратора")
+
+        db.execute(
+            text("DELETE FROM users WHERE username = :username"),
+            {"username": normalized},
+        )
+        db.commit()
+
+        audit_event(
+            action="admin.users.delete",
+            outcome="success",
+            actor=context.get("username"),
+            details={"target": normalized},
+        )
+        return {"status": "ok"}
+    except HTTPException:
+        db.rollback()
+        raise
+    except SQLAlchemyError as exc:
+        db.rollback()
+        audit_event(
+            action="admin.users.delete",
+            outcome="failure",
+            actor=context.get("username"),
+            details={"target": normalized, "error": type(exc).__name__},
+        )
+        raise HTTPException(status_code=500, detail="Не удалось удалить пользователя") from exc
+
+
 @router.post("/local/{username}/block", response_model=CachedUserOut)
 def block_local_user(
     username: str,

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { blockLocalUser, createLocalUser, getLocalUsers, unblockLocalUser, updateLocalUser, updateLocalUserRole } from '../services/api'
+import { blockLocalUser, createLocalUser, deleteLocalUser, getLocalUsers, unblockLocalUser, updateLocalUser, updateLocalUserRole } from '../services/api'
 import Spinner from '../components/Spinner'
 
 export default function UsersPage() {
@@ -11,6 +11,7 @@ export default function UsersPage() {
   const [query, setQuery] = useState('')
   const [savingRoleFor, setSavingRoleFor] = useState('')
   const [savingBlockFor, setSavingBlockFor] = useState('')
+  const [deletingUserFor, setDeletingUserFor] = useState('')
   const [creating, setCreating] = useState(false)
   const [editingUser, setEditingUser] = useState(null)
   const [newUser, setNewUser] = useState({ username: '', display_name: '', password: '', role: 'staff' })
@@ -75,6 +76,27 @@ export default function UsersPage() {
       setError(err.response?.data?.detail || (user.is_blocked ? t('users.unblockError') : t('users.blockError')))
     } finally {
       setSavingBlockFor('')
+    }
+  }
+
+  const handleDeleteUser = async (user) => {
+    setError('')
+    const confirmed = window.confirm(t('users.deleteConfirm', { username: user.username }))
+    if (!confirmed) {
+      return
+    }
+
+    setDeletingUserFor(user.username)
+    try {
+      await deleteLocalUser(user.username)
+      setUsers((prev) => prev.filter((item) => item.username !== user.username))
+      if (editingUser === user.username) {
+        cancelEdit()
+      }
+    } catch (err) {
+      setError(err.response?.data?.detail || t('users.deleteError'))
+    } finally {
+      setDeletingUserFor('')
     }
   }
 
@@ -231,6 +253,13 @@ export default function UsersPage() {
                     >
                       {user.is_blocked ? t('users.unblockBtn') : t('users.blockBtn')}
                     </button>
+                    <button
+                      className="btn-secondary text-xs px-3 py-1.5"
+                      disabled={deletingUserFor === user.username}
+                      onClick={() => handleDeleteUser(user)}
+                    >
+                      {t('users.deleteBtn')}
+                    </button>
                   </div>
                   {user.is_blocked && user.blocked_until && (
                     <p className="text-xs text-red-500 dark:text-red-300">
@@ -358,6 +387,13 @@ export default function UsersPage() {
                             onClick={() => handleToggleBlock(user)}
                           >
                             {user.is_blocked ? t('users.unblockBtn') : t('users.blockBtn')}
+                          </button>
+                          <button
+                            className="btn-secondary text-xs px-3 py-2"
+                            disabled={deletingUserFor === user.username}
+                            onClick={() => handleDeleteUser(user)}
+                          >
+                            {t('users.deleteBtn')}
                           </button>
                         </div>
                       )}

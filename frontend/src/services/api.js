@@ -94,6 +94,9 @@ export const createLocalUser = (payload) =>
 export const updateLocalUser = (username, payload) =>
   api.patch(`/users/local/${encodeURIComponent(username)}`, payload).then((r) => r.data)
 
+export const deleteLocalUser = (username) =>
+  api.delete(`/users/local/${encodeURIComponent(username)}`).then((r) => r.data)
+
 export const updateLocalUserRole = (username, role) =>
   api.patch(`/users/local/${encodeURIComponent(username)}/role`, { role }).then((r) => r.data)
 

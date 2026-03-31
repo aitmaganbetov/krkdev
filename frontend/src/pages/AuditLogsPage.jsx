@@ -18,6 +18,7 @@ const ACTION_LABELS = {
   'admin.users.role.update': 'Изменение роли пользователя',
   'admin.users.block': 'Блокировка пользователя',
   'admin.users.unblock': 'Разблокировка пользователя',
+  'admin.users.delete': 'Удаление пользователя',
   'admin.migrate.faculties': 'Импорт факультетов',
   'admin.migrate.records-submitted-by': 'Миграция submitted_by',
 }

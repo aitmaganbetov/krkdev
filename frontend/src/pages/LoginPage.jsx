@@ -58,7 +58,7 @@ export default function LoginPage() {
       <div className="card w-full max-w-md p-8">
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-bold text-primary-600 dark:text-primary-400">KRK Monitor</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">QMC System — {t('auth.title')}</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">KRK System — {t('auth.title')}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">

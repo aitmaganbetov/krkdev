@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { blockLocalUser, createLocalUser, deleteLocalUser, getLocalUsers, unblockLocalUser, updateLocalUser, updateLocalUserRole } from '../services/api'
+import { formatDateTimeUtcPlus5 } from '../utils/datetime'
 import Spinner from '../components/Spinner'
 
 export default function UsersPage() {
@@ -227,7 +228,7 @@ export default function UsersPage() {
                   <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400">
                     <span>{user.auth_source || '—'}</span>
                     {user.is_ldap && <span>LDAP</span>}
-                    {user.last_login_at && <span>{user.last_login_at}</span>}
+                    {user.last_login_at && <span>{formatDateTimeUtcPlus5(user.last_login_at)}</span>}
                     <span className={`px-2 py-0.5 rounded-full font-medium ${statusClass(user.is_blocked)}`}>
                       {user.is_blocked ? t('users.statusBlocked') : t('users.statusActive')}
                     </span>
@@ -358,7 +359,7 @@ export default function UsersPage() {
                         )}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400 whitespace-nowrap">{user.last_login_at || '—'}</td>
+                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400 whitespace-nowrap">{user.last_login_at ? formatDateTimeUtcPlus5(user.last_login_at) : '—'}</td>
                     <td className="px-4 py-3 text-right">
                       {editingUser === user.username ? (
                         <div className="flex items-center justify-end gap-2">

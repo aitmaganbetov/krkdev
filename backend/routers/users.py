@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 from database import get_db
 from services import ROLE_ADMIN, get_current_user, require_roles
 from services.audit_log import audit_event
+from services.request_meta import get_client_ip
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -597,9 +598,11 @@ def list_ldap_directory_users(
 def update_local_user_role(
     username: str,
     body: UserRoleUpdateIn,
+    request: Request,
     db: Session = Depends(get_db),
     context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
 ):
+    client_ip = get_client_ip(request)
     role = _validate_role(body.role)
 
     try:
@@ -634,6 +637,8 @@ def update_local_user_role(
             outcome="success",
             actor=context.get("username"),
             details={"target": username.strip().lower(), "role": role},
+            db=db,
+            ip_address=client_ip,
         )
         return _map_cached_user_row(row)
     except SQLAlchemyError as exc:
@@ -643,6 +648,8 @@ def update_local_user_role(
             outcome="failure",
             actor=context.get("username"),
             details={"target": username.strip().lower(), "error": type(exc).__name__},
+            db=db,
+            ip_address=client_ip,
         )
         raise HTTPException(status_code=500, detail="Не удалось обновить роль пользователя") from exc
 
@@ -650,9 +657,11 @@ def update_local_user_role(
 @router.post("/local", response_model=CachedUserOut, status_code=201)
 def create_local_user(
     body: LocalUserCreateIn,
+    request: Request,
     db: Session = Depends(get_db),
     context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
 ):
+    client_ip = get_client_ip(request)
     username = _normalize_username(body.username)
     if not username:
         raise HTTPException(status_code=400, detail="Логин обязателен")
@@ -707,6 +716,8 @@ def create_local_user(
             outcome="success",
             actor=context.get("username"),
             details={"target": username, "role": role},
+            db=db,
+            ip_address=client_ip,
         )
         return _map_cached_user_row(row)
     except HTTPException:
@@ -716,6 +727,8 @@ def create_local_user(
             outcome="failure",
             actor=context.get("username"),
             details={"target": username, "reason": "validation_or_conflict"},
+            db=db,
+            ip_address=client_ip,
         )
         raise
     except SQLAlchemyError as exc:
@@ -725,6 +738,8 @@ def create_local_user(
             outcome="failure",
             actor=context.get("username"),
             details={"target": username, "error": type(exc).__name__},
+            db=db,
+            ip_address=client_ip,
         )
         raise HTTPException(status_code=500, detail="Не удалось создать пользователя") from exc
 
@@ -733,9 +748,11 @@ def create_local_user(
 def update_local_user(
     username: str,
     body: LocalUserUpdateIn,
+    request: Request,
     db: Session = Depends(get_db),
     context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
 ):
+    client_ip = get_client_ip(request)
     normalized = _normalize_username(username)
     if not normalized:
         raise HTTPException(status_code=400, detail="Некорректный логин")
@@ -794,6 +811,8 @@ def update_local_user(
             outcome="success",
             actor=context.get("username"),
             details={"target": normalized, "updated_fields": sorted(list(updates.keys()) + (["role"] if role is not None else []))},
+            db=db,
+            ip_address=client_ip,
         )
         return _map_cached_user_row(row)
     except HTTPException:
@@ -803,6 +822,8 @@ def update_local_user(
             outcome="failure",
             actor=context.get("username"),
             details={"target": normalized, "reason": "validation_or_not_found"},
+            db=db,
+            ip_address=client_ip,
         )
         raise
     except SQLAlchemyError as exc:
@@ -812,6 +833,8 @@ def update_local_user(
             outcome="failure",
             actor=context.get("username"),
             details={"target": normalized, "error": type(exc).__name__},
+            db=db,
+            ip_address=client_ip,
         )
         raise HTTPException(status_code=500, detail="Не удалось обновить пользователя") from exc
 
@@ -819,9 +842,11 @@ def update_local_user(
 @router.delete("/local/{username}")
 def delete_local_user(
     username: str,
+    request: Request,
     db: Session = Depends(get_db),
     context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
 ):
+    client_ip = get_client_ip(request)
     normalized = _normalize_username(username)
     actor = _normalize_username(context.get("username") or "")
     if not normalized:
@@ -868,6 +893,8 @@ def delete_local_user(
             outcome="success",
             actor=context.get("username"),
             details={"target": normalized},
+            db=db,
+            ip_address=client_ip,
         )
         return {"status": "ok"}
     except HTTPException:
@@ -880,6 +907,8 @@ def delete_local_user(
             outcome="failure",
             actor=context.get("username"),
             details={"target": normalized, "error": type(exc).__name__},
+            db=db,
+            ip_address=client_ip,
         )
         raise HTTPException(status_code=500, detail="Не удалось удалить пользователя") from exc
 
@@ -888,9 +917,11 @@ def delete_local_user(
 def block_local_user(
     username: str,
     body: UserBlockIn,
+    request: Request,
     db: Session = Depends(get_db),
     context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
 ):
+    client_ip = get_client_ip(request)
     normalized = _normalize_username(username)
     actor = _normalize_username(context.get("username") or "")
     if not normalized:
@@ -945,6 +976,8 @@ def block_local_user(
             outcome="success",
             actor=context.get("username"),
             details={"target": normalized, "reason": reason, "duration_minutes": duration_minutes},
+            db=db,
+            ip_address=client_ip,
         )
         return _map_cached_user_row(row)
     except HTTPException:
@@ -957,6 +990,8 @@ def block_local_user(
             outcome="failure",
             actor=context.get("username"),
             details={"target": normalized, "error": type(exc).__name__},
+            db=db,
+            ip_address=client_ip,
         )
         raise HTTPException(status_code=500, detail="Не удалось заблокировать пользователя") from exc
 
@@ -964,9 +999,11 @@ def block_local_user(
 @router.post("/local/{username}/unblock", response_model=CachedUserOut)
 def unblock_local_user(
     username: str,
+    request: Request,
     db: Session = Depends(get_db),
     context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
 ):
+    client_ip = get_client_ip(request)
     normalized = _normalize_username(username)
     if not normalized:
         raise HTTPException(status_code=400, detail="Некорректный логин")
@@ -1000,6 +1037,8 @@ def unblock_local_user(
             outcome="success",
             actor=context.get("username"),
             details={"target": normalized},
+            db=db,
+            ip_address=client_ip,
         )
         return _map_cached_user_row(row)
     except HTTPException:
@@ -1012,5 +1051,7 @@ def unblock_local_user(
             outcome="failure",
             actor=context.get("username"),
             details={"target": normalized, "error": type(exc).__name__},
+            db=db,
+            ip_address=client_ip,
         )
         raise HTTPException(status_code=500, detail="Не удалось разблокировать пользователя") from exc

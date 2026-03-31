@@ -8,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from database import get_db
 from schemas.auth import LoginRequest, TokenOut
+from services.request_meta import get_client_ip
 from services.auth_service import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     AUTH_COOKIE_NAME,
@@ -137,7 +138,7 @@ def _get_request_context_if_valid(request: Request) -> dict[str, str] | None:
 
 
 def _resolve_me_context(request: Request, db: Session) -> dict[str, str]:
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = get_client_ip(request)
     token = _extract_access_token(request)
     if not token:
         audit_event(
@@ -181,7 +182,7 @@ def _resolve_me_context(request: Request, db: Session) -> dict[str, str]:
 @router.post("/login", response_model=TokenOut)
 def login(body: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
     now = datetime.now(timezone.utc)
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = get_client_ip(request)
     attempt_key = _make_attempt_key(body.username, client_ip)
     username = (body.username or "").strip().lower()
     _ensure_users_table(db)
@@ -268,7 +269,7 @@ def logout(
     response: Response,
     db: Session = Depends(get_db),
 ):
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = get_client_ip(request)
     logout_reason = request.headers.get("X-Logout-Reason") or "manual"
     context = _get_request_context_if_valid(request)
     audit_event(

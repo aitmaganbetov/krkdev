@@ -118,7 +118,7 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed, onToggle
       <div className="px-4 py-4 border-b border-indigo-100/70 dark:border-gray-800 flex items-center justify-between gap-2">
         <div className={`min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
           <span className="text-lg font-bold text-primary-600 dark:text-primary-400 tracking-tight">
-            KRK Monitor
+            KRK Мониторинг
           </span>
           <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{t('sidebar.subtitle')}</p>
         </div>

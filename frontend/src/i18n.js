@@ -22,7 +22,7 @@ const resources = {
         lightTheme: 'Светлая тема',
         darkTheme: 'Темная тема',
         logout: 'Выйти',
-        subtitle: 'QMC System',
+        subtitle: 'KRK System',
       },
       // Auth
       auth: {
@@ -350,7 +350,7 @@ const resources = {
         lightTheme: 'Ашық тақырып',
         darkTheme: 'Қараңғы тақырып',
         logout: 'Шығу',
-        subtitle: 'QMC Жүйесі',
+        subtitle: 'KRK Жүйесі',
       },
       auth: {
         title: 'Жүйеге кіру',
@@ -668,7 +668,7 @@ const resources = {
         lightTheme: 'Light theme',
         darkTheme: 'Dark theme',
         logout: 'Logout',
-        subtitle: 'QMC System',
+        subtitle: 'KRK System',
       },
       auth: {
         title: 'Sign in',

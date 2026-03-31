@@ -91,11 +91,15 @@ def _ensure_users_table(db) -> None:
             ldap_dn VARCHAR(512) NULL,
             password_hash VARCHAR(255) NULL,
             password_salt VARCHAR(255) NULL,
+            is_blocked TINYINT(1) NOT NULL DEFAULT 0,
+            blocked_until DATETIME NULL,
+            block_reason VARCHAR(255) NULL,
             last_login_at DATETIME NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             KEY idx_users_last_login_at (last_login_at),
             KEY idx_users_role_id (role_id),
+            KEY idx_users_blocked_until (blocked_until),
             CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES roles(id)
         ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
     """))
@@ -109,6 +113,42 @@ def _ensure_users_table(db) -> None:
     if not role_column:
         db.execute(text("ALTER TABLE users ADD COLUMN role_id INT NULL"))
         db.execute(text("ALTER TABLE users ADD KEY idx_users_role_id (role_id)"))
+
+    blocked_column = db.execute(text("""
+        SELECT 1
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'is_blocked'
+        LIMIT 1
+    """)).first()
+    if not blocked_column:
+        db.execute(text("ALTER TABLE users ADD COLUMN is_blocked TINYINT(1) NOT NULL DEFAULT 0"))
+
+    blocked_until_column = db.execute(text("""
+        SELECT 1
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'blocked_until'
+        LIMIT 1
+    """)).first()
+    if not blocked_until_column:
+        db.execute(text("ALTER TABLE users ADD COLUMN blocked_until DATETIME NULL"))
+
+    block_reason_column = db.execute(text("""
+        SELECT 1
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'block_reason'
+        LIMIT 1
+    """)).first()
+    if not block_reason_column:
+        db.execute(text("ALTER TABLE users ADD COLUMN block_reason VARCHAR(255) NULL"))
+
+    blocked_index = db.execute(text("""
+        SELECT 1
+        FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND INDEX_NAME = 'idx_users_blocked_until'
+        LIMIT 1
+    """)).first()
+    if not blocked_index:
+        db.execute(text("ALTER TABLE users ADD KEY idx_users_blocked_until (blocked_until)"))
 
     fk_exists = db.execute(text("""
         SELECT 1

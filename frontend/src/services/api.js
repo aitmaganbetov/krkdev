@@ -97,6 +97,12 @@ export const updateLocalUser = (username, payload) =>
 export const updateLocalUserRole = (username, role) =>
   api.patch(`/users/local/${encodeURIComponent(username)}/role`, { role }).then((r) => r.data)
 
+export const blockLocalUser = (username, payload = {}) =>
+  api.post(`/users/local/${encodeURIComponent(username)}/block`, payload).then((r) => r.data)
+
+export const unblockLocalUser = (username) =>
+  api.post(`/users/local/${encodeURIComponent(username)}/unblock`).then((r) => r.data)
+
 export const getRecord = (id) =>
   api.get(`/records/${id}`).then((r) => r.data)
 

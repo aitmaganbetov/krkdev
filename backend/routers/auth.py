@@ -4,12 +4,14 @@ from threading import Lock
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from database import get_db
 from schemas.auth import LoginRequest, TokenOut
 from services.auth_service import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     AUTH_COOKIE_NAME,
+    _ensure_users_table,
     authenticate_user_details,
     create_access_token,
     get_current_user_context,
@@ -26,26 +28,12 @@ AUTH_COOKIE_SECURE = (os.getenv("AUTH_COOKIE_SECURE", "false").strip().lower() i
 AUTH_COOKIE_SAMESITE = (os.getenv("AUTH_COOKIE_SAMESITE", "lax").strip().lower() or "lax")
 
 _failed_attempts: dict[str, deque[datetime]] = defaultdict(deque)
-_blocked_until: dict[str, datetime] = {}
 _attempts_lock = Lock()
 
 
 def _make_attempt_key(username: str, client_ip: str) -> str:
     normalized_username = (username or "").strip().lower()
-    normalized_ip = (client_ip or "unknown").strip()
-    return f"{normalized_username}|{normalized_ip}"
-
-
-def _is_blocked(key: str, now: datetime) -> bool:
-    with _attempts_lock:
-        blocked_until = _blocked_until.get(key)
-        if not blocked_until:
-            return False
-        if now >= blocked_until:
-            _blocked_until.pop(key, None)
-            _failed_attempts.pop(key, None)
-            return False
-        return True
+    return normalized_username or (client_ip or "unknown").strip()
 
 
 def _register_failed_attempt(key: str, now: datetime) -> bool:
@@ -56,7 +44,6 @@ def _register_failed_attempt(key: str, now: datetime) -> bool:
             attempts.popleft()
         attempts.append(now)
         if len(attempts) >= LOGIN_MAX_FAILED_ATTEMPTS:
-            _blocked_until[key] = now + timedelta(seconds=LOGIN_LOCKOUT_SECONDS)
             attempts.clear()
             return True
         return False
@@ -65,7 +52,63 @@ def _register_failed_attempt(key: str, now: datetime) -> bool:
 def _clear_attempts(key: str) -> None:
     with _attempts_lock:
         _failed_attempts.pop(key, None)
-        _blocked_until.pop(key, None)
+
+
+def _read_user_block_state(db: Session, username: str, now: datetime) -> tuple[bool, str | None, datetime | None]:
+    row = db.execute(
+        text("""
+        SELECT is_blocked, blocked_until, block_reason
+        FROM users
+        WHERE username = :username
+        LIMIT 1
+        """),
+        {"username": username},
+    ).mappings().first()
+    if not row:
+        return False, None, None
+
+    is_blocked = bool(row.get("is_blocked"))
+    blocked_until = row.get("blocked_until")
+    reason = row.get("block_reason")
+
+    if not is_blocked:
+        return False, reason, blocked_until
+
+    if blocked_until and now >= blocked_until:
+        db.execute(
+            text("""
+            UPDATE users
+            SET is_blocked = 0,
+                blocked_until = NULL,
+                block_reason = NULL
+            WHERE username = :username
+            """),
+            {"username": username},
+        )
+        db.commit()
+        return False, None, None
+
+    return True, reason, blocked_until
+
+
+def _apply_temporary_user_lock(db: Session, username: str, reason: str) -> None:
+    if not username:
+        return
+    db.execute(
+        text("""
+        UPDATE users
+        SET is_blocked = 1,
+            blocked_until = DATE_ADD(UTC_TIMESTAMP(), INTERVAL :lock_seconds SECOND),
+            block_reason = :reason
+        WHERE username = :username
+        """),
+        {
+            "username": username,
+            "lock_seconds": LOGIN_LOCKOUT_SECONDS,
+            "reason": reason[:255],
+        },
+    )
+    db.commit()
 
 
 def _extract_access_token(request: Request) -> str | None:
@@ -141,19 +184,26 @@ def login(body: LoginRequest, request: Request, response: Response, db: Session 
     client_ip = request.client.host if request.client else "unknown"
     attempt_key = _make_attempt_key(body.username, client_ip)
     username = (body.username or "").strip().lower()
+    _ensure_users_table(db)
 
-    if _is_blocked(attempt_key, now):
+    blocked, block_reason, blocked_until = _read_user_block_state(db, username, now)
+    if blocked:
+        is_temporary_lock = bool(blocked_until)
         audit_event(
             action="auth.login",
             outcome="blocked",
             actor=username,
-            details={"ip": client_ip, "reason": "rate_limited"},
+            details={
+                "ip": client_ip,
+                "reason": block_reason or "user_blocked",
+                "blocked_until": blocked_until.isoformat() if blocked_until else None,
+            },
             db=db,
             ip_address=client_ip,
         )
         raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many login attempts. Try again later.",
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=("Слишком много попыток входа. Попробуйте позже." if is_temporary_lock else "Пользователь заблокирован администратором"),
         )
 
     authenticated, normalized_username, source, role = authenticate_user_details(body.username, body.password)
@@ -161,6 +211,7 @@ def login(body: LoginRequest, request: Request, response: Response, db: Session 
     if not authenticated:
         blocked = _register_failed_attempt(attempt_key, now)
         if blocked:
+            _apply_temporary_user_lock(db, normalized_username, "too_many_failed_attempts")
             audit_event(
                 action="auth.login",
                 outcome="blocked",

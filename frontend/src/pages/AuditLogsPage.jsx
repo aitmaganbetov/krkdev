@@ -16,6 +16,8 @@ const ACTION_LABELS = {
   'admin.users.create': 'Создание пользователя',
   'admin.users.update': 'Обновление пользователя',
   'admin.users.role.update': 'Изменение роли пользователя',
+  'admin.users.block': 'Блокировка пользователя',
+  'admin.users.unblock': 'Разблокировка пользователя',
   'admin.migrate.faculties': 'Импорт факультетов',
   'admin.migrate.records-submitted-by': 'Миграция submitted_by',
 }

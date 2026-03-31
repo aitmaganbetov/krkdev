@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { createLocalUser, getLocalUsers, updateLocalUser, updateLocalUserRole } from '../services/api'
+import { blockLocalUser, createLocalUser, getLocalUsers, unblockLocalUser, updateLocalUser, updateLocalUserRole } from '../services/api'
 import Spinner from '../components/Spinner'
 
 export default function UsersPage() {
@@ -10,6 +10,7 @@ export default function UsersPage() {
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
   const [savingRoleFor, setSavingRoleFor] = useState('')
+  const [savingBlockFor, setSavingBlockFor] = useState('')
   const [creating, setCreating] = useState(false)
   const [editingUser, setEditingUser] = useState(null)
   const [newUser, setNewUser] = useState({ username: '', display_name: '', password: '', role: 'staff' })
@@ -61,6 +62,25 @@ export default function UsersPage() {
       setCreating(false)
     }
   }
+
+  const handleToggleBlock = async (user) => {
+    setError('')
+    setSavingBlockFor(user.username)
+    try {
+      const updated = user.is_blocked
+        ? await unblockLocalUser(user.username)
+        : await blockLocalUser(user.username, { reason: 'manual_admin_block' })
+      setUsers((prev) => prev.map((item) => (item.username === user.username ? updated : item)))
+    } catch (err) {
+      setError(err.response?.data?.detail || (user.is_blocked ? t('users.unblockError') : t('users.blockError')))
+    } finally {
+      setSavingBlockFor('')
+    }
+  }
+
+  const statusClass = (isBlocked) => (isBlocked
+    ? 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+    : 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300')
 
   const startEdit = (user) => {
     setEditingUser(user.username)
@@ -186,6 +206,9 @@ export default function UsersPage() {
                     <span>{user.auth_source || '—'}</span>
                     {user.is_ldap && <span>LDAP</span>}
                     {user.last_login_at && <span>{user.last_login_at}</span>}
+                    <span className={`px-2 py-0.5 rounded-full font-medium ${statusClass(user.is_blocked)}`}>
+                      {user.is_blocked ? t('users.statusBlocked') : t('users.statusActive')}
+                    </span>
                   </div>
                   <div className="flex gap-2">
                     <select
@@ -201,7 +224,19 @@ export default function UsersPage() {
                     <button className="btn-secondary text-xs px-3 py-1.5" onClick={() => startEdit(user)}>
                       {t('users.editBtn')}
                     </button>
+                    <button
+                      className="btn-secondary text-xs px-3 py-1.5"
+                      disabled={savingBlockFor === user.username}
+                      onClick={() => handleToggleBlock(user)}
+                    >
+                      {user.is_blocked ? t('users.unblockBtn') : t('users.blockBtn')}
+                    </button>
                   </div>
+                  {user.is_blocked && user.blocked_until && (
+                    <p className="text-xs text-red-500 dark:text-red-300">
+                      {t('users.blockedUntil')}: {user.blocked_until}
+                    </p>
+                  )}
                   {editingUser === user.username && (
                     <div className="space-y-2 pt-2 border-t border-gray-100 dark:border-gray-800">
                       <input
@@ -240,6 +275,7 @@ export default function UsersPage() {
                   <th className="px-4 py-3">{t('users.roleCol')}</th>
                   <th className="px-4 py-3">{t('users.sourceCol')}</th>
                   <th className="px-4 py-3">{t('users.ldapCol')}</th>
+                  <th className="px-4 py-3">{t('users.statusCol')}</th>
                   <th className="px-4 py-3">{t('users.lastLoginCol')}</th>
                   <th className="px-4 py-3"></th>
                 </tr>
@@ -283,6 +319,16 @@ export default function UsersPage() {
                     </td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{user.auth_source || '—'}</td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{user.is_ldap ? t('users.isLdap') : t('users.notLdap')}</td>
+                    <td className="px-4 py-3 text-gray-600 dark:text-gray-400">
+                      <div className="flex flex-col gap-1">
+                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium w-fit ${statusClass(user.is_blocked)}`}>
+                          {user.is_blocked ? t('users.statusBlocked') : t('users.statusActive')}
+                        </span>
+                        {user.is_blocked && user.blocked_until && (
+                          <span className="text-xs text-red-500 dark:text-red-300">{t('users.blockedUntil')}: {user.blocked_until}</span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-gray-500 dark:text-gray-400 whitespace-nowrap">{user.last_login_at || '—'}</td>
                     <td className="px-4 py-3 text-right">
                       {editingUser === user.username ? (
@@ -302,9 +348,18 @@ export default function UsersPage() {
                           </button>
                         </div>
                       ) : (
-                        <button className="btn-secondary text-xs px-3 py-2" onClick={() => startEdit(user)}>
-                          {t('users.editBtn')}
-                        </button>
+                        <div className="flex items-center justify-end gap-2">
+                          <button className="btn-secondary text-xs px-3 py-2" onClick={() => startEdit(user)}>
+                            {t('users.editBtn')}
+                          </button>
+                          <button
+                            className="btn-secondary text-xs px-3 py-2"
+                            disabled={savingBlockFor === user.username}
+                            onClick={() => handleToggleBlock(user)}
+                          >
+                            {user.is_blocked ? t('users.unblockBtn') : t('users.blockBtn')}
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>

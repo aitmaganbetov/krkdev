@@ -28,6 +28,9 @@ class CachedUserOut(BaseModel):
     is_ldap: bool
     ldap_dn: str | None = None
     last_login_at: str
+    is_blocked: bool
+    blocked_until: str | None = None
+    block_reason: str | None = None
 
 
 class LdapDirectoryUserOut(BaseModel):
@@ -51,6 +54,11 @@ class LocalUserUpdateIn(BaseModel):
     display_name: str | None = None
     password: str | None = None
     role: str | None = None
+
+
+class UserBlockIn(BaseModel):
+    reason: str | None = None
+    duration_minutes: int | None = None
 
 
 def _import_ldap3_for_users():
@@ -128,7 +136,10 @@ def _fetch_local_user_row(db: Session, username: str):
             u.auth_source,
             u.is_ldap,
             u.ldap_dn,
-            DATE_FORMAT(u.last_login_at, '%Y-%m-%d %H:%i:%s') AS last_login_at
+            DATE_FORMAT(u.last_login_at, '%Y-%m-%d %H:%i:%s') AS last_login_at,
+            u.is_blocked,
+            DATE_FORMAT(u.blocked_until, '%Y-%m-%d %H:%i:%s') AS blocked_until,
+            u.block_reason
         FROM users u
         LEFT JOIN roles r ON r.id = u.role_id
         WHERE u.username = :username
@@ -145,6 +156,9 @@ def _map_cached_user_row(row) -> dict:
         "is_ldap": bool(row["is_ldap"]),
         "ldap_dn": row["ldap_dn"],
         "last_login_at": row["last_login_at"] or "",
+        "is_blocked": bool(row.get("is_blocked")),
+        "blocked_until": row.get("blocked_until"),
+        "block_reason": row.get("block_reason"),
     }
 
 
@@ -171,11 +185,15 @@ def _ensure_users_table(db: Session) -> None:
             ldap_dn VARCHAR(512) NULL,
             password_hash VARCHAR(255) NULL,
             password_salt VARCHAR(255) NULL,
+            is_blocked TINYINT(1) NOT NULL DEFAULT 0,
+            blocked_until DATETIME NULL,
+            block_reason VARCHAR(255) NULL,
             last_login_at DATETIME NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             KEY idx_users_last_login_at (last_login_at),
             KEY idx_users_role_id (role_id),
+            KEY idx_users_blocked_until (blocked_until),
             CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES roles(id)
         ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
     """))
@@ -189,6 +207,42 @@ def _ensure_users_table(db: Session) -> None:
     if not role_column:
         db.execute(text("ALTER TABLE users ADD COLUMN role_id INT NULL"))
         db.execute(text("ALTER TABLE users ADD KEY idx_users_role_id (role_id)"))
+
+    blocked_column = db.execute(text("""
+        SELECT 1
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'is_blocked'
+        LIMIT 1
+    """)).first()
+    if not blocked_column:
+        db.execute(text("ALTER TABLE users ADD COLUMN is_blocked TINYINT(1) NOT NULL DEFAULT 0"))
+
+    blocked_until_column = db.execute(text("""
+        SELECT 1
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'blocked_until'
+        LIMIT 1
+    """)).first()
+    if not blocked_until_column:
+        db.execute(text("ALTER TABLE users ADD COLUMN blocked_until DATETIME NULL"))
+
+    block_reason_column = db.execute(text("""
+        SELECT 1
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'block_reason'
+        LIMIT 1
+    """)).first()
+    if not block_reason_column:
+        db.execute(text("ALTER TABLE users ADD COLUMN block_reason VARCHAR(255) NULL"))
+
+    blocked_index = db.execute(text("""
+        SELECT 1
+        FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND INDEX_NAME = 'idx_users_blocked_until'
+        LIMIT 1
+    """)).first()
+    if not blocked_index:
+        db.execute(text("ALTER TABLE users ADD KEY idx_users_blocked_until (blocked_until)"))
 
     fk_exists = db.execute(text("""
         SELECT 1
@@ -397,7 +451,10 @@ def list_local_users(
                 u.auth_source,
                 u.is_ldap,
                 u.ldap_dn,
-                DATE_FORMAT(u.last_login_at, '%Y-%m-%d %H:%i:%s') AS last_login_at
+                DATE_FORMAT(u.last_login_at, '%Y-%m-%d %H:%i:%s') AS last_login_at,
+                u.is_blocked,
+                DATE_FORMAT(u.blocked_until, '%Y-%m-%d %H:%i:%s') AS blocked_until,
+                u.block_reason
             FROM users u
             LEFT JOIN roles r ON r.id = u.role_id
             ORDER BY last_login_at DESC
@@ -412,7 +469,10 @@ def list_local_users(
                     u.auth_source,
                     u.is_ldap,
                     u.ldap_dn,
-                    DATE_FORMAT(u.last_login_at, '%Y-%m-%d %H:%i:%s') AS last_login_at
+                    DATE_FORMAT(u.last_login_at, '%Y-%m-%d %H:%i:%s') AS last_login_at,
+                    u.is_blocked,
+                    DATE_FORMAT(u.blocked_until, '%Y-%m-%d %H:%i:%s') AS blocked_until,
+                    u.block_reason
                 FROM users u
                 LEFT JOIN roles r ON r.id = u.role_id
                 ORDER BY last_login_at DESC
@@ -754,3 +814,135 @@ def update_local_user(
             details={"target": normalized, "error": type(exc).__name__},
         )
         raise HTTPException(status_code=500, detail="Не удалось обновить пользователя") from exc
+
+
+@router.post("/local/{username}/block", response_model=CachedUserOut)
+def block_local_user(
+    username: str,
+    body: UserBlockIn,
+    db: Session = Depends(get_db),
+    context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+):
+    normalized = _normalize_username(username)
+    actor = _normalize_username(context.get("username") or "")
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Некорректный логин")
+    if normalized == actor:
+        raise HTTPException(status_code=400, detail="Нельзя заблокировать самого себя")
+
+    duration_minutes = body.duration_minutes
+    if duration_minutes is not None and duration_minutes <= 0:
+        raise HTTPException(status_code=400, detail="duration_minutes должен быть больше 0")
+
+    reason = (body.reason or "manual_admin_block").strip()[:255]
+
+    try:
+        _ensure_users_table(db)
+        target = db.execute(
+            text("SELECT id FROM users WHERE username = :username LIMIT 1"),
+            {"username": normalized},
+        ).first()
+        if not target:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+        if duration_minutes is None:
+            db.execute(
+                text("""
+                    UPDATE users
+                    SET is_blocked = 1,
+                        blocked_until = NULL,
+                        block_reason = :reason
+                    WHERE username = :username
+                """),
+                {"username": normalized, "reason": reason},
+            )
+        else:
+            db.execute(
+                text("""
+                    UPDATE users
+                    SET is_blocked = 1,
+                        blocked_until = DATE_ADD(UTC_TIMESTAMP(), INTERVAL :duration_minutes MINUTE),
+                        block_reason = :reason
+                    WHERE username = :username
+                """),
+                {"username": normalized, "reason": reason, "duration_minutes": duration_minutes},
+            )
+        db.commit()
+
+        row = _fetch_local_user_row(db, normalized)
+        if not row:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        audit_event(
+            action="admin.users.block",
+            outcome="success",
+            actor=context.get("username"),
+            details={"target": normalized, "reason": reason, "duration_minutes": duration_minutes},
+        )
+        return _map_cached_user_row(row)
+    except HTTPException:
+        db.rollback()
+        raise
+    except SQLAlchemyError as exc:
+        db.rollback()
+        audit_event(
+            action="admin.users.block",
+            outcome="failure",
+            actor=context.get("username"),
+            details={"target": normalized, "error": type(exc).__name__},
+        )
+        raise HTTPException(status_code=500, detail="Не удалось заблокировать пользователя") from exc
+
+
+@router.post("/local/{username}/unblock", response_model=CachedUserOut)
+def unblock_local_user(
+    username: str,
+    db: Session = Depends(get_db),
+    context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+):
+    normalized = _normalize_username(username)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Некорректный логин")
+
+    try:
+        _ensure_users_table(db)
+        target = db.execute(
+            text("SELECT id FROM users WHERE username = :username LIMIT 1"),
+            {"username": normalized},
+        ).first()
+        if not target:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+        db.execute(
+            text("""
+                UPDATE users
+                SET is_blocked = 0,
+                    blocked_until = NULL,
+                    block_reason = NULL
+                WHERE username = :username
+            """),
+            {"username": normalized},
+        )
+        db.commit()
+
+        row = _fetch_local_user_row(db, normalized)
+        if not row:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        audit_event(
+            action="admin.users.unblock",
+            outcome="success",
+            actor=context.get("username"),
+            details={"target": normalized},
+        )
+        return _map_cached_user_row(row)
+    except HTTPException:
+        db.rollback()
+        raise
+    except SQLAlchemyError as exc:
+        db.rollback()
+        audit_event(
+            action="admin.users.unblock",
+            outcome="failure",
+            actor=context.get("username"),
+            details={"target": normalized, "error": type(exc).__name__},
+        )
+        raise HTTPException(status_code=500, detail="Не удалось разблокировать пользователя") from exc

@@ -123,7 +123,11 @@ def get_records(
     if search:
         pattern = f"%{search}%"
         query = query.filter(
-            Record.teacher.ilike(pattern) | Record.subject.ilike(pattern)
+            Record.teacher.ilike(pattern)
+            | Record.subject.ilike(pattern)
+            | Record.group_name.ilike(pattern)
+            | Record.op.ilike(pattern)
+            | Record.submitted_by.ilike(pattern)
         )
 
     total = query.count()

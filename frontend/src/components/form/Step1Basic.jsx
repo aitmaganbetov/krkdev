@@ -12,7 +12,8 @@ export default function Step1Basic({ data, onChange, catalog, catalogLoading = f
     : [{ id: `legacy-faculty-${data.faculty}`, name_ru: data.faculty, specializations: [] }, ...catalogFaculties]
 
   const specializationBaseOptions = selectedFaculty?.specializations ?? []
-  const selectedSpecialization = specializationBaseOptions.find((specialization) => specialization.name_ru === data.op)
+  const opValue = (s) => s.code ? `${s.code} - ${s.name_ru}` : s.name_ru
+  const selectedSpecialization = specializationBaseOptions.find((s) => opValue(s) === data.op || s.name_ru === data.op)
   const specializationOptions = selectedSpecialization || !data.op
     ? specializationBaseOptions
     : [{ id: `legacy-specialization-${data.op}`, name_ru: data.op, groups: [] }, ...specializationBaseOptions]
@@ -102,8 +103,8 @@ export default function Step1Basic({ data, onChange, catalog, catalogLoading = f
           >
             <option value="">{data.faculty ? t('steps.selectOp') : t('steps.selectFacultyFirst')}</option>
             {specializationOptions.map((specialization) => (
-              <option key={specialization.id} value={specialization.name_ru}>
-                {specialization.code ? `${specialization.code} - ${specialization.name_ru}` : specialization.name_ru}
+              <option key={specialization.id} value={opValue(specialization)}>
+                {opValue(specialization)}
               </option>
             ))}
           </select>

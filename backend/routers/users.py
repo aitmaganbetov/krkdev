@@ -548,16 +548,29 @@ def list_ldap_directory_users(
 
         # Generic AD-style user filter.
         search_filter = "(&(objectClass=user)(!(objectClass=computer)))"
-        connection.search(
-            search_base=base_dn,
-            search_filter=search_filter,
-            search_scope=SUBTREE,
-            attributes=["sAMAccountName", "userPrincipalName", "displayName", "cn"],
-            size_limit=5000,
-        )
+
+        # Use paged search to bypass the server-side size limit (default 1000 in AD).
+        entries_raw = []
+        cookie = None
+        while True:
+            connection.search(
+                search_base=base_dn,
+                search_filter=search_filter,
+                search_scope=SUBTREE,
+                attributes=["sAMAccountName", "userPrincipalName", "displayName", "cn"],
+                size_limit=0,
+                paged_size=500,
+                paged_cookie=cookie,
+            )
+            entries_raw.extend(connection.entries)
+            controls = connection.result.get("controls") or {}
+            paged_control = controls.get("1.2.840.113556.1.4.319") or {}
+            cookie = (paged_control.get("value") or {}).get("cookie")
+            if not cookie:
+                break
 
         result: dict[str, dict] = {}
-        for entry in connection.entries:
+        for entry in entries_raw:
             attrs = entry.entry_attributes_as_dict
             username = (
                 (attrs.get("sAMAccountName") or [None])[0]

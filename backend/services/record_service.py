@@ -122,13 +122,21 @@ def get_records(
         query = query.filter(Record.academic_year == academic_year)
     if search:
         pattern = f"%{search}%"
-        query = query.filter(
+        # Subquery: find logins whose display_name matches
+        matched_users = db.execute(
+            text("SELECT username FROM users WHERE display_name LIKE :p"),
+            {"p": pattern},
+        ).scalars().all()
+        conditions = (
             Record.teacher.ilike(pattern)
             | Record.subject.ilike(pattern)
             | Record.group_name.ilike(pattern)
             | Record.op.ilike(pattern)
             | Record.submitted_by.ilike(pattern)
         )
+        if matched_users:
+            conditions = conditions | Record.submitted_by.in_(matched_users)
+        query = query.filter(conditions)
 
     total = query.count()
     if inspector_review_view:

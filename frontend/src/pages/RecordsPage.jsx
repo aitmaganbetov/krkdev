@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { getRecords, deleteRecord } from '../services/api'
+import { getRecords, deleteRecord, getBasicInfoCatalog } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import Spinner from '../components/Spinner'
 import StatusBadge from '../components/StatusBadge'
@@ -23,11 +23,15 @@ export default function RecordsPage() {
   const [deleting, setDeleting] = useState(null)
 
   // Filters
-  const [search, setSearch]           = useState('')
-  const [filterTeacher, setFilterTeacher] = useState('')
-  const [filterSubject, setFilterSubject] = useState('')
-  const [filterOp, setFilterOp]           = useState('')
-  const [filterYear, setFilterYear]       = useState('')
+  const [search, setSearch]     = useState('')
+  const [filterYear, setFilterYear] = useState('')
+  const [academicYears, setAcademicYears] = useState([])
+
+  useEffect(() => {
+    getBasicInfoCatalog()
+      .then((r) => setAcademicYears(r.academic_years ?? []))
+      .catch(() => {})
+  }, [])
 
   const fetchRecords = useCallback(async (pageNum = 0) => {
     setLoading(true)
@@ -36,9 +40,6 @@ export default function RecordsPage() {
         skip: pageNum * LIMIT,
         limit: LIMIT,
         search: search || undefined,
-        teacher: filterTeacher || undefined,
-        subject: filterSubject || undefined,
-        op: filterOp || undefined,
         academic_year: filterYear || undefined,
       })
       setItems(data.items)
@@ -48,7 +49,7 @@ export default function RecordsPage() {
     } finally {
       setLoading(false)
     }
-  }, [search, filterTeacher, filterSubject, filterOp, filterYear])
+  }, [search, filterYear])
 
   useEffect(() => {
     setPage(0)
@@ -86,37 +87,23 @@ export default function RecordsPage() {
       </div>
 
       {/* Filters */}
-      <div className="card p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="card p-4 flex flex-col sm:flex-row gap-3">
         <input
-          className="input"
+          className="input flex-1"
           placeholder={t('records.searchPlaceholderFull')}
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => { setSearch(e.target.value); setPage(0) }}
         />
-        <input
-          className="input"
-          placeholder={t('records.teacher')}
-          value={filterTeacher}
-          onChange={(e) => setFilterTeacher(e.target.value)}
-        />
-        <input
-          className="input"
-          placeholder={t('records.subject')}
-          value={filterSubject}
-          onChange={(e) => setFilterSubject(e.target.value)}
-        />
-        <input
-          className="input"
-          placeholder={t('records.op')}
-          value={filterOp}
-          onChange={(e) => setFilterOp(e.target.value)}
-        />
-        <input
-          className="input"
-          placeholder={t('records.academicYear')}
+        <select
+          className="input sm:w-52"
           value={filterYear}
-          onChange={(e) => setFilterYear(e.target.value)}
-        />
+          onChange={(e) => { setFilterYear(e.target.value); setPage(0) }}
+        >
+          <option value="">{t('records.allYears')}</option>
+          {academicYears.map((y) => (
+            <option key={y} value={y}>{y}</option>
+          ))}
+        </select>
       </div>
 
       {/* Table */}

@@ -73,6 +73,7 @@ export default function DashboardPage() {
   }, [facultyOptions, filterOptions, selectedFaculty])
 
   const averageScoreHeight = Math.max(8, Math.min(100, (Number(stats?.avg_score || 0) / 10) * 100))
+  const averageAttendanceHeight = Math.max(8, Math.min(100, Number(stats?.avg_attendance || 0)))
 
   const comparisonTitle = useMemo(() => {
     if (selectedOp) return t('dashboard.compareByGroup')
@@ -137,7 +138,6 @@ export default function DashboardPage() {
         <StatCard
           title={t('dashboard.avgScore')}
           value={stats.avg_score.toFixed(1)}
-          sub={t('dashboard.outOf')}
           color={stats.avg_score >= 7 ? 'green' : stats.avg_score >= 5 ? 'yellow' : 'red'}
         />
         <StatCard
@@ -148,7 +148,6 @@ export default function DashboardPage() {
         <StatCard
           title={t('dashboard.problemRecords')}
           value={stats.problem_records}
-          sub={t('dashboard.belowFive')}
           color={stats.problem_records > 0 ? 'red' : 'green'}
         />
       </div>
@@ -195,18 +194,25 @@ export default function DashboardPage() {
           <p className="text-sm text-gray-500 dark:text-gray-400">{t('dashboard.noData')}</p>
         ) : (
           <div className="h-[260px] w-full rounded-2xl border border-indigo-100/70 dark:border-indigo-900/40 bg-gradient-to-b from-indigo-50/70 via-white to-emerald-50/60 dark:from-gray-900 dark:via-gray-900 dark:to-emerald-950/30 p-4">
-            <div className="h-full w-full flex items-end justify-center">
-              <div className="w-full max-w-[320px] h-full flex flex-col items-center justify-end">
+            <div className="h-full w-full flex items-end justify-center gap-10">
+              <div className="w-full max-w-[240px] h-full flex flex-col items-center justify-end">
                 <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">{t('dashboard.avgScoreLabel')}</div>
                 <div
                   className="w-full rounded-t-xl rounded-b-md bg-gradient-to-b from-indigo-600 to-emerald-500 shadow-[0_10px_18px_rgba(79,70,229,0.25)] transition-all duration-300"
-                  style={{
-                    height: `${averageScoreHeight}%`,
-                    minHeight: '24px',
-                  }}
+                  style={{ height: `${averageScoreHeight}%`, minHeight: '24px' }}
                 />
                 <div className="mt-3 text-2xl font-bold text-indigo-600 dark:text-indigo-400">
                   {Number(stats.avg_score || 0).toFixed(1)} / 10
+                </div>
+              </div>
+              <div className="w-full max-w-[240px] h-full flex flex-col items-center justify-end">
+                <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">{t('dashboard.avgAttendanceLabel')}</div>
+                <div
+                  className="w-full rounded-t-xl rounded-b-md bg-gradient-to-b from-yellow-400 to-orange-400 shadow-[0_10px_18px_rgba(234,179,8,0.25)] transition-all duration-300"
+                  style={{ height: `${averageAttendanceHeight}%`, minHeight: '24px' }}
+                />
+                <div className="mt-3 text-2xl font-bold text-yellow-600 dark:text-yellow-400">
+                  {Number(stats.avg_attendance || 0).toFixed(1)}%
                 </div>
               </div>
             </div>

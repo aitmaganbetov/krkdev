@@ -87,6 +87,7 @@ def get_records(
     db: Session,
     skip: int = 0,
     limit: int = 50,
+    status: Optional[str] = None,
     faculty: Optional[str] = None,
     teacher: Optional[str] = None,
     subject: Optional[str] = None,
@@ -107,6 +108,9 @@ def get_records(
 
     if inspector_review_view:
         query = query.filter(Record.status.in_(["submitted", "accepted"]))
+
+    if status:
+        query = query.filter(Record.status == status)
 
     if faculty:
         query = query.filter(Record.faculty == faculty)
@@ -263,7 +267,7 @@ def get_dashboard_stats(
     faculty: Optional[str] = None,
     op: Optional[str] = None,
 ) -> DashboardStats:
-    base = db.query(Record)
+    base = db.query(Record).filter(Record.status == "accepted")
     if faculty:
         base = base.filter(Record.faculty == faculty)
     if op:
@@ -283,7 +287,7 @@ def get_dashboard_stats(
 
 
 def get_dashboard_stats_for_user(db: Session, submitted_by: str) -> DashboardStats:
-    scoped = db.query(Record).filter(Record.submitted_by == submitted_by)
+    scoped = db.query(Record).filter(Record.submitted_by == submitted_by, Record.status == "accepted")
     total = scoped.with_entities(func.count(Record.id)).scalar() or 0
     avg_score = scoped.with_entities(func.avg(Record.score)).scalar() or 0.0
     avg_attendance = scoped.with_entities(func.avg(Record.attendance)).scalar() or 0.0
@@ -298,7 +302,11 @@ def get_dashboard_stats_for_user(db: Session, submitted_by: str) -> DashboardSta
 
 
 def get_record_filter_options(db: Session) -> dict:
-    rows = db.query(Record.faculty, Record.op).filter(Record.faculty.isnot(None), Record.op.isnot(None)).all()
+    rows = db.query(Record.faculty, Record.op).filter(
+        Record.status == "accepted",
+        Record.faculty.isnot(None),
+        Record.op.isnot(None),
+    ).all()
 
     by_faculty: dict[str, set[str]] = {}
     for faculty, op in rows:
@@ -342,7 +350,12 @@ def get_faculty_comparison(
             func.avg(Record.score).label("avg_score"),
             func.avg(Record.attendance).label("avg_attendance"),
             func.sum(case(((Record.score < 5) | (Record.attendance < 40), 1), else_=0)).label("problem_records"),
-        ).filter(Record.group_name.isnot(None), Record.group_name != "", Record.op == op)
+        ).filter(
+            Record.status == "accepted",
+            Record.group_name.isnot(None),
+            Record.group_name != "",
+            Record.op == op,
+        )
         if faculty:
             query = query.filter(Record.faculty == faculty)
         rows = query.group_by(Record.group_name).all()
@@ -354,7 +367,12 @@ def get_faculty_comparison(
             func.avg(Record.score).label("avg_score"),
             func.avg(Record.attendance).label("avg_attendance"),
             func.sum(case(((Record.score < 5) | (Record.attendance < 40), 1), else_=0)).label("problem_records"),
-        ).filter(Record.op.isnot(None), Record.op != "", Record.faculty == faculty)
+        ).filter(
+            Record.status == "accepted",
+            Record.op.isnot(None),
+            Record.op != "",
+            Record.faculty == faculty,
+        )
         rows = query.group_by(Record.op).all()
     else:
         label_column = Record.faculty.label("label")
@@ -364,7 +382,11 @@ def get_faculty_comparison(
             func.avg(Record.score).label("avg_score"),
             func.avg(Record.attendance).label("avg_attendance"),
             func.sum(case(((Record.score < 5) | (Record.attendance < 40), 1), else_=0)).label("problem_records"),
-        ).filter(Record.faculty.isnot(None), Record.faculty != "")
+        ).filter(
+            Record.status == "accepted",
+            Record.faculty.isnot(None),
+            Record.faculty != "",
+        )
         rows = query.group_by(Record.faculty).all()
 
     result = []

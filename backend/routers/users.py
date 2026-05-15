@@ -678,8 +678,8 @@ def create_local_user(
     username = _normalize_username(body.username)
     if not username:
         raise HTTPException(status_code=400, detail="Логин обязателен")
-    if len((body.password or "").strip()) < 4:
-        raise HTTPException(status_code=400, detail="Пароль должен быть не короче 4 символов")
+    if len((body.password or "").strip()) < 8:
+        raise HTTPException(status_code=400, detail="Пароль должен быть не короче 8 символов")
 
     role = _validate_role(body.role)
     password_hash, password_salt = _hash_password(body.password)
@@ -775,8 +775,8 @@ def update_local_user(
         updates["display_name"] = body.display_name.strip() or normalized
 
     if body.password is not None:
-        if len(body.password.strip()) < 4:
-            raise HTTPException(status_code=400, detail="Пароль должен быть не короче 4 символов")
+        if len(body.password.strip()) < 8:
+            raise HTTPException(status_code=400, detail="Пароль должен быть не короче 8 символов")
         password_hash, password_salt = _hash_password(body.password)
         updates["password_hash"] = password_hash
         updates["password_salt"] = password_salt

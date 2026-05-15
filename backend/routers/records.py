@@ -15,6 +15,7 @@ from services import (
     require_roles,
 )
 from services.audit_log import audit_event
+from services.request_meta import get_client_ip
 
 router = APIRouter(prefix="/records", tags=["records"])
 
@@ -68,6 +69,7 @@ def dashboard(
 def list_records(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
+    status: Optional[str] = Query(None),
     faculty: Optional[str] = Query(None),
     teacher: Optional[str] = Query(None),
     subject: Optional[str] = Query(None),
@@ -87,7 +89,7 @@ def list_records(
 
     total, items = record_service.get_records(
         db, skip=skip, limit=limit,
-        faculty=faculty, teacher=teacher, subject=subject, op=op,
+        status=status, faculty=faculty, teacher=teacher, subject=subject, op=op,
         group_name=group_name, academic_year=academic_year, search=search,
         submitted_by=submitted_by,
         submitted_by_aliases=submitted_by_aliases,
@@ -117,7 +119,7 @@ def create_record(
                 "status": record.status,
             },
             db=db,
-            ip_address=request.client.host if request.client else None,
+            ip_address=get_client_ip(request),
         )
         return record
     except Exception as e:
@@ -127,7 +129,7 @@ def create_record(
             actor=current_user["username"],
             details={"error": str(e), "teacher": getattr(body, 'teacher', None)},
             db=db,
-            ip_address=request.client.host if request.client else None,
+            ip_address=get_client_ip(request),
         )
         raise
 
@@ -176,7 +178,7 @@ def update_record(
                 "changed_fields": list(body.dict(exclude_unset=True).keys()),
             },
             db=db,
-            ip_address=request.client.host if request.client else None,
+            ip_address=get_client_ip(request),
         )
         return result
     except Exception as e:
@@ -186,7 +188,7 @@ def update_record(
             actor=current_user["username"],
             details={"record_id": record_id, "error": str(e)},
             db=db,
-            ip_address=request.client.host if request.client else None,
+            ip_address=get_client_ip(request),
         )
         raise
 
@@ -206,7 +208,7 @@ def delete_record(
             actor=current_user["username"],
             details={"record_id": record_id},
             db=db,
-            ip_address=request.client.host if request.client else None,
+            ip_address=get_client_ip(request),
         )
     except Exception as e:
         audit_event(
@@ -215,7 +217,7 @@ def delete_record(
             actor=current_user["username"],
             details={"record_id": record_id, "error": str(e)},
             db=db,
-            ip_address=request.client.host if request.client else None,
+            ip_address=get_client_ip(request),
         )
         raise
 
@@ -259,7 +261,7 @@ def submit_record(
                 "status": record.status,
             },
             db=db,
-            ip_address=request.client.host if request.client else None,
+            ip_address=get_client_ip(request),
         )
         return record
     except HTTPException:
@@ -271,7 +273,7 @@ def submit_record(
             actor=current_user["username"],
             details={"record_id": record_id, "error": str(e)},
             db=db,
-            ip_address=request.client.host if request.client else None,
+            ip_address=get_client_ip(request),
         )
         raise
 
@@ -308,7 +310,7 @@ def send_to_rework(
                 "subject": record.subject,
             },
             db=db,
-            ip_address=request.client.host if request.client else None,
+            ip_address=get_client_ip(request),
         )
         return record
     except HTTPException:
@@ -320,7 +322,7 @@ def send_to_rework(
             actor=current_user["username"],
             details={"record_id": record_id, "error": str(e)},
             db=db,
-            ip_address=request.client.host if request.client else None,
+            ip_address=get_client_ip(request),
         )
         raise
 
@@ -358,7 +360,7 @@ def accept_record(
                 "status": record.status,
             },
             db=db,
-            ip_address=request.client.host if request.client else None,
+            ip_address=get_client_ip(request),
         )
         return record
     except HTTPException:
@@ -370,6 +372,6 @@ def accept_record(
             actor=current_user["username"],
             details={"record_id": record_id, "error": str(e)},
             db=db,
-            ip_address=request.client.host if request.client else None,
+            ip_address=get_client_ip(request),
         )
         raise

@@ -1,7 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import * as XLSX from 'xlsx-js-style'
 import { getRecords, deleteRecord, getBasicInfoCatalog } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import Spinner from '../components/Spinner'
@@ -68,6 +67,64 @@ const RATING_HEADER_TO_KEY = {
   'Актуальность и новизна предлагаемого материала.': '3.4',
 }
 
+const EXCEL_ACCENT_FILL = '87CEEB'
+const EXCEL_ACCENT_TEXT = '003049'
+const EXCEL_BORDER = {
+  top: { style: 'thin', color: { argb: 'FF000000' } },
+  bottom: { style: 'thin', color: { argb: 'FF000000' } },
+  left: { style: 'thin', color: { argb: 'FF000000' } },
+  right: { style: 'thin', color: { argb: 'FF000000' } },
+}
+
+function createMetricChartDataUrl({ title, value, maxValue, displayValue, color }) {
+  const canvas = document.createElement('canvas')
+  canvas.width = 960
+  canvas.height = 280
+
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return ''
+
+  ctx.fillStyle = '#FFFFFF'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+  ctx.fillStyle = '#0F172A'
+  ctx.font = 'bold 28px Arial'
+  ctx.fillText(title, 40, 48)
+
+  ctx.fillStyle = '#475569'
+  ctx.font = '20px Arial'
+  ctx.fillText(`Значение: ${displayValue}`, 40, 84)
+
+  const chartLeft = 40
+  const chartTop = 120
+  const chartWidth = 840
+  const chartHeight = 70
+  const safeMax = Math.max(maxValue, 1)
+  const normalizedValue = Math.max(0, Math.min(value, safeMax))
+  const barWidth = (normalizedValue / safeMax) * chartWidth
+
+  ctx.fillStyle = '#E2E8F0'
+  ctx.fillRect(chartLeft, chartTop, chartWidth, chartHeight)
+
+  ctx.fillStyle = color
+  ctx.fillRect(chartLeft, chartTop, barWidth, chartHeight)
+
+  ctx.strokeStyle = '#94A3B8'
+  ctx.lineWidth = 2
+  ctx.strokeRect(chartLeft, chartTop, chartWidth, chartHeight)
+
+  ctx.fillStyle = '#334155'
+  ctx.font = '18px Arial'
+  ctx.fillText('0', chartLeft, chartTop + 100)
+  ctx.fillText(String(displayValue), chartLeft + Math.max(barWidth - 10, 0), chartTop - 12)
+
+  ctx.textAlign = 'right'
+  ctx.fillText(String(maxValue), chartLeft + chartWidth, chartTop + 100)
+  ctx.textAlign = 'left'
+
+  return canvas.toDataURL('image/png')
+}
+
 export default function RecordsPage() {
   const navigate = useNavigate()
   const { role } = useAuth()
@@ -88,21 +145,48 @@ export default function RecordsPage() {
   const [search, setSearch] = useState('')
   const [filterYear, setFilterYear] = useState('')
   const [filterFaculty, setFilterFaculty] = useState('')
+  const [filterOp, setFilterOp] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [academicYears, setAcademicYears] = useState([])
   const [faculties, setFaculties] = useState([])
+  const [opsByFaculty, setOpsByFaculty] = useState({})
+  const [allOps, setAllOps] = useState([])
 
   useEffect(() => {
     getBasicInfoCatalog()
       .then((r) => {
         setAcademicYears(r.academic_years ?? [])
-        const facultyNames = (r.faculties ?? [])
+        const catalogFaculties = r.faculties ?? []
+        const facultyNames = catalogFaculties
           .map((faculty) => faculty?.name_ru)
           .filter(Boolean)
         setFaculties(Array.from(new Set(facultyNames)))
+
+        const formatOpValue = (specialization) => (
+          specialization?.code
+            ? `${specialization.code} - ${specialization.name_ru || ''}`.trim()
+            : (specialization?.name_ru || '').trim()
+        )
+
+        const nextOpsByFaculty = {}
+        const opSet = new Set()
+        catalogFaculties.forEach((faculty) => {
+          const facultyName = faculty?.name_ru
+          if (!facultyName) return
+          const facultyOps = (faculty?.specializations ?? [])
+            .map(formatOpValue)
+            .filter(Boolean)
+          nextOpsByFaculty[facultyName] = Array.from(new Set(facultyOps)).sort((a, b) => a.localeCompare(b))
+          facultyOps.forEach((opValue) => opSet.add(opValue))
+        })
+
+        setOpsByFaculty(nextOpsByFaculty)
+        setAllOps(Array.from(opSet).sort((a, b) => a.localeCompare(b)))
       })
       .catch(() => {})
   }, [])
+
+  const opOptions = filterFaculty ? (opsByFaculty[filterFaculty] ?? []) : allOps
 
   const fetchRecords = useCallback(async (pageNum = 0) => {
     setLoading(true)
@@ -113,6 +197,7 @@ export default function RecordsPage() {
         search: search || undefined,
         academic_year: filterYear || undefined,
         faculty: filterFaculty || undefined,
+        op: filterOp || undefined,
         status: filterStatus || undefined,
       })
       setItems(data.items)
@@ -122,7 +207,7 @@ export default function RecordsPage() {
     } finally {
       setLoading(false)
     }
-  }, [search, filterYear, filterFaculty, filterStatus, pageSize, t])
+  }, [search, filterYear, filterFaculty, filterOp, filterStatus, pageSize, t])
 
   useEffect(() => {
     setPage(0)
@@ -147,6 +232,7 @@ export default function RecordsPage() {
 
     setExporting(true)
     try {
+      const ExcelJS = (await import('exceljs')).default
       const exportLimit = 200
       let skip = 0
       let totalForExport = 0
@@ -159,6 +245,7 @@ export default function RecordsPage() {
           search: search || undefined,
           academic_year: filterYear || undefined,
           faculty: filterFaculty || undefined,
+          op: filterOp || undefined,
           status: filterStatus || undefined,
         })
 
@@ -185,6 +272,8 @@ export default function RecordsPage() {
       const totalStudentsFact = acceptedRows.reduce((sum, record) => sum + Number(record.students_fact || 0), 0)
       const averageScore = acceptedRows.reduce((sum, record) => sum + Number(record.score || 0), 0) / acceptedRows.length
       const totalAttendancePercent = totalStudentsPlan > 0 ? (totalStudentsFact / totalStudentsPlan) * 100 : 0
+      const averageAttendance = acceptedRows.reduce((sum, record) => sum + Number(record.attendance || 0), 0) / acceptedRows.length
+      const problemRecords = acceptedRows.filter((record) => Number(record.score || 0) < 5 || Number(record.attendance || 0) < 40).length
 
       const summaryRow = EXPORT_COLUMNS.map((column) => {
         if (column.header === 'Порядковый номер') return 'ИТОГ'
@@ -202,67 +291,135 @@ export default function RecordsPage() {
       })
 
       const allRows = [headerRow, ...valueRows, summaryRow]
-      const worksheet = XLSX.utils.aoa_to_sheet(allRows)
-      worksheet['!autofilter'] = {
-        ref: XLSX.utils.encode_range({ s: { c: 0, r: 0 }, e: { c: EXPORT_COLUMNS.length - 1, r: allRows.length - 1 } }),
+      const workbook = new ExcelJS.Workbook()
+      const worksheet = workbook.addWorksheet('Report', {
+        views: [{ state: 'frozen', ySplit: 1 }],
+      })
+
+      worksheet.autoFilter = {
+        from: { row: 1, column: 1 },
+        to: { row: 1, column: EXPORT_COLUMNS.length },
       }
-      worksheet['!cols'] = EXPORT_COLUMNS.map((_, columnIndex) => {
+
+      worksheet.columns = EXPORT_COLUMNS.map((_, columnIndex) => {
         const maxLength = allRows.reduce((currentMax, row) => {
           const rawValue = row[columnIndex]
           const normalized = rawValue === null || rawValue === undefined ? '' : String(rawValue)
           return Math.max(currentMax, normalized.length)
         }, 0)
 
-        // Add padding and clamp width to keep the sheet readable.
-        return { wch: Math.min(Math.max(maxLength + 2, 10), 90) }
+        return { width: Math.min(Math.max(maxLength + 2, 10), 90) }
       })
 
-      const thinBorder = {
-        top: { style: 'thin', color: { rgb: '000000' } },
-        bottom: { style: 'thin', color: { rgb: '000000' } },
-        left: { style: 'thin', color: { rgb: '000000' } },
-        right: { style: 'thin', color: { rgb: '000000' } },
-      }
+      allRows.forEach((row) => worksheet.addRow(row))
 
-      const accentRowStyle = {
-        fill: { fgColor: { rgb: '87CEEB' } },
-        font: { bold: true, color: { rgb: '003049' } },
-        alignment: { vertical: 'center', horizontal: 'center', wrapText: true },
-        border: thinBorder,
-      }
-      const headerRowIndex = 1
-      const summaryRowIndex = valueRows.length + 2
-
-      for (let columnIndex = 0; columnIndex < EXPORT_COLUMNS.length; columnIndex += 1) {
-        const columnLetter = XLSX.utils.encode_col(columnIndex)
-        const headerCellAddress = `${columnLetter}${headerRowIndex}`
-        const summaryCellAddress = `${columnLetter}${summaryRowIndex}`
-
-        if (worksheet[headerCellAddress]) {
-          worksheet[headerCellAddress].s = accentRowStyle
-        }
-        if (worksheet[summaryCellAddress]) {
-          worksheet[summaryCellAddress].s = accentRowStyle
-        }
-      }
-
-      for (let rowIndex = 1; rowIndex <= allRows.length; rowIndex += 1) {
-        for (let columnIndex = 0; columnIndex < EXPORT_COLUMNS.length; columnIndex += 1) {
-          const cellAddress = `${XLSX.utils.encode_col(columnIndex)}${rowIndex}`
-          if (!worksheet[cellAddress]) continue
-
-          worksheet[cellAddress].s = {
-            ...(worksheet[cellAddress].s || {}),
-            border: thinBorder,
+      worksheet.eachRow((row, rowNumber) => {
+        row.eachCell((cell) => {
+          cell.border = EXCEL_BORDER
+          cell.alignment = {
+            vertical: 'middle',
+            wrapText: true,
           }
-        }
-      }
+          if (rowNumber === 1 || rowNumber === allRows.length) {
+            cell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: `FF${EXCEL_ACCENT_FILL}` },
+            }
+            cell.font = {
+              bold: true,
+              color: { argb: `FF${EXCEL_ACCENT_TEXT}` },
+            }
+            cell.alignment = {
+              vertical: 'middle',
+              horizontal: 'center',
+              wrapText: true,
+            }
+          }
+        })
+      })
 
-      const workbook = XLSX.utils.book_new()
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Report')
+      const chartsSheet = workbook.addWorksheet('Графики')
+      chartsSheet.columns = [
+        { width: 4 },
+        { width: 24 },
+        { width: 24 },
+        { width: 24 },
+        { width: 24 },
+        { width: 24 },
+        { width: 24 },
+        { width: 24 },
+      ]
+
+      chartsSheet.mergeCells('B2:H2')
+      chartsSheet.getCell('B2').value = 'Графики по экспортированным данным'
+      chartsSheet.getCell('B2').fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: `FF${EXCEL_ACCENT_FILL}` },
+      }
+      chartsSheet.getCell('B2').font = {
+        bold: true,
+        size: 16,
+        color: { argb: `FF${EXCEL_ACCENT_TEXT}` },
+      }
+      chartsSheet.getCell('B2').alignment = { horizontal: 'center', vertical: 'middle' }
+
+      chartsSheet.mergeCells('B3:H3')
+      chartsSheet.getCell('B3').value = `Фильтры: поиск=${search || 'все'}, год=${filterYear || 'все'}, факультет=${filterFaculty || 'все'}, статус=accepted`
+      chartsSheet.getCell('B3').font = { italic: true, color: { argb: 'FF475569' } }
+
+      const chartDefinitions = [
+        {
+          title: 'Средний балл',
+          value: averageScore,
+          maxValue: 10,
+          displayValue: averageScore.toFixed(2).replace('.', ','),
+          color: '#0EA5E9',
+        },
+        {
+          title: 'Средняя посещаемость',
+          value: averageAttendance,
+          maxValue: 100,
+          displayValue: `${averageAttendance.toFixed(1).replace('.', ',')}%`,
+          color: '#10B981',
+        },
+        {
+          title: 'Проблемные записи',
+          value: problemRecords,
+          maxValue: Math.max(problemRecords, acceptedRows.length, 1),
+          displayValue: String(problemRecords),
+          color: '#F97316',
+        },
+      ]
+
+      chartDefinitions.forEach((chart, index) => {
+        const imageData = createMetricChartDataUrl(chart)
+        if (!imageData) return
+
+        const imageId = workbook.addImage({
+          base64: imageData,
+          extension: 'png',
+        })
+
+        const topRow = 4 + index * 15
+        chartsSheet.addImage(imageId, {
+          tl: { col: 1, row: topRow - 1 },
+          ext: { width: 900, height: 250 },
+        })
+      })
 
       const today = new Date().toISOString().slice(0, 10)
-      XLSX.writeFile(workbook, `records_${today}.xlsx`)
+      const buffer = await workbook.xlsx.writeBuffer()
+      const blob = new Blob([
+        buffer,
+      ], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `records_${today}.xlsx`
+      link.click()
+      URL.revokeObjectURL(url)
     } catch {
       alert(t('records.exportError'))
     } finally {
@@ -347,12 +504,26 @@ export default function RecordsPage() {
           value={filterFaculty}
           onChange={(e) => {
             setFilterFaculty(e.target.value)
+            setFilterOp('')
             setPage(0)
           }}
         >
           <option value="">{t('dashboard.allFaculties')}</option>
           {faculties.map((facultyName) => (
             <option key={facultyName} value={facultyName}>{facultyName}</option>
+          ))}
+        </select>
+        <select
+          className="input sm:w-64"
+          value={filterOp}
+          onChange={(e) => {
+            setFilterOp(e.target.value)
+            setPage(0)
+          }}
+        >
+          <option value="">{t('records.allOps')}</option>
+          {opOptions.map((opValue) => (
+            <option key={opValue} value={opValue}>{opValue}</option>
           ))}
         </select>
         <select

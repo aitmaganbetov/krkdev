@@ -10,6 +10,7 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
+  const [filterRole, setFilterRole] = useState('')
   const [savingRoleFor, setSavingRoleFor] = useState('')
   const [savingBlockFor, setSavingBlockFor] = useState('')
   const [deletingUserFor, setDeletingUserFor] = useState('')
@@ -30,13 +31,16 @@ export default function UsersPage() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return users
+    const r = filterRole.trim()
+    if (!q && !r) return users
     return users.filter((user) => {
       const username = (user.username || '').toLowerCase()
       const displayName = (user.display_name || '').toLowerCase()
-      return username.includes(q) || displayName.includes(q)
+      const matchesQuery = !q || username.includes(q) || displayName.includes(q)
+      const matchesRole = !r || (user.role || 'staff') === r
+      return matchesQuery && matchesRole
     })
-  }, [users, query])
+  }, [users, query, filterRole])
 
   const handleRoleChange = async (username, role) => {
     setSavingRoleFor(username)
@@ -160,6 +164,20 @@ export default function UsersPage() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
+      </div>
+
+      <div className="card p-4">
+        <label className="label mb-2">{t('users.filterByRole')}</label>
+        <select
+          className="input"
+          value={filterRole}
+          onChange={(e) => setFilterRole(e.target.value)}
+        >
+          <option value="">{t('users.allRoles')}</option>
+          <option value="admin">admin</option>
+          <option value="inspector">inspector</option>
+          <option value="staff">staff</option>
+        </select>
       </div>
 
       <div className="card p-4">

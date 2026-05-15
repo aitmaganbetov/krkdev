@@ -74,6 +74,8 @@ export default function DashboardPage() {
 
   const averageScoreHeight = Math.max(8, Math.min(100, (Number(stats?.avg_score || 0) / 10) * 100))
   const averageAttendanceHeight = Math.max(8, Math.min(100, Number(stats?.avg_attendance || 0)))
+  const problemRecordsMaxHeight = Math.max(1, Number(stats?.total_records || 1))
+  const problemRecordsHeight = Math.max(8, Math.min(100, (Number(stats?.problem_records || 0) / problemRecordsMaxHeight) * 100))
 
   const comparisonTitle = useMemo(() => {
     if (selectedOp) return t('dashboard.compareByGroup')
@@ -85,38 +87,65 @@ export default function DashboardPage() {
   const maxComparisonAttendance = useMemo(() => Math.max(...comparison.map((item) => Number(item.avg_attendance || 0)), 100), [comparison])
   const maxComparisonProblems = useMemo(() => Math.max(...comparison.map((item) => Number(item.problem_records || 0)), 1), [comparison])
 
-  const renderComparisonChart = (title, valueKey, maxValue, formatter = (v) => String(v)) => (
+  const renderComparisonChart = (
+    title,
+    valueKey,
+    maxValue,
+    formatter = (v) => String(v),
+    barClass = 'bg-gradient-to-b from-indigo-600 to-emerald-500 shadow-[0_10px_18px_rgba(79,70,229,0.25)]',
+    options = {}
+  ) => {
+    const chartItems = options.dropZeroValues
+      ? comparison.filter((item) => Number(item[valueKey] || 0) > 0)
+      : comparison
+
+    return (
     <div className="card p-4">
       <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">{title}</h3>
-      {comparison.length === 0 ? (
+      {chartItems.length === 0 ? (
         <p className="text-sm text-gray-500 dark:text-gray-400">{t('dashboard.noDataChart')}</p>
       ) : (
-        <div className="h-[220px] rounded-2xl border border-indigo-100/70 dark:border-indigo-900/40 bg-gradient-to-b from-indigo-50/70 via-white to-emerald-50/60 dark:from-gray-900 dark:via-gray-900 dark:to-emerald-950/30 p-3">
-          <div className="h-full w-full flex items-end justify-between gap-2">
-            {comparison.map((item) => {
+        <div className="rounded-2xl border border-indigo-100/70 dark:border-indigo-900/40 bg-gradient-to-b from-indigo-50/70 via-white to-emerald-50/60 dark:from-gray-900 dark:via-gray-900 dark:to-emerald-950/30 p-3 overflow-x-auto">
+          <div className="w-max mx-auto">
+          {/* bars */}
+          <div
+            className="h-[160px] mb-2 grid auto-cols-[68px] grid-flow-col items-end gap-2"
+            style={{ minWidth: `${Math.max(chartItems.length * 72, 72)}px` }}
+          >
+            {chartItems.map((item) => {
               const raw = Number(item[valueKey] || 0)
-              const heightPct = Math.max(10, (raw / maxValue) * 100)
+              const hideZero = options.hideZeroValues && raw === 0
+              const barHeight = hideZero ? 0 : Math.max(6, (raw / maxValue) * 100)
               return (
-                <div key={`${valueKey}-${item.label}`} className="flex-1 h-full flex flex-col justify-end items-center">
-                  <div className="text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 mb-1">{formatter(raw)}</div>
-                  <div
-                    className="w-full rounded-t-lg rounded-b-sm bg-gradient-to-b from-indigo-600 to-emerald-500 shadow-[0_8px_14px_rgba(79,70,229,0.25)]"
-                    style={{
-                      height: `${heightPct}%`,
-                      minHeight: '18px',
-                    }}
-                  />
-                  <div className="pt-2 text-[10px] text-center text-gray-600 dark:text-gray-400 line-clamp-2">
-                    {item.label}
+                <div key={`${valueKey}-${item.label}`} className="h-full flex flex-col justify-end items-center">
+                  <div className="text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 mb-1 leading-tight text-center min-h-[16px]">
+                    {hideZero ? '' : formatter(raw)}
                   </div>
+                  <div
+                    className={`w-full rounded-t-xl rounded-b-md ${barClass}`}
+                    style={{ height: `${barHeight}%`, minHeight: hideZero ? '0px' : '8px' }}
+                  />
                 </div>
               )
             })}
+          </div>
+          {/* labels row below bars */}
+          <div
+            className="grid auto-cols-[68px] grid-flow-col gap-2"
+            style={{ minWidth: `${Math.max(chartItems.length * 72, 72)}px` }}
+          >
+            {chartItems.map((item) => (
+              <div key={`label-${item.label}`} className="text-[10px] text-center text-gray-600 dark:text-gray-400 leading-tight break-words hyphens-auto">
+                {item.label}
+              </div>
+            ))}
+          </div>
           </div>
         </div>
       )}
     </div>
   )
+  }
 
   if (loading) return (
     <div className="flex items-center justify-center h-64"><Spinner size="lg" /></div>
@@ -215,6 +244,16 @@ export default function DashboardPage() {
                   {Number(stats.avg_attendance || 0).toFixed(1)}%
                 </div>
               </div>
+              <div className="w-full max-w-[240px] h-full flex flex-col items-center justify-end">
+                <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">{t('dashboard.problemRecordsLabel')}</div>
+                <div
+                  className="w-full rounded-t-xl rounded-b-md bg-gradient-to-b from-red-500 to-rose-400 shadow-[0_10px_18px_rgba(239,68,68,0.25)] transition-all duration-300"
+                  style={{ height: `${problemRecordsHeight}%`, minHeight: '24px' }}
+                />
+                <div className="mt-3 text-2xl font-bold text-red-600 dark:text-red-400">
+                  {Number(stats.problem_records || 0)}
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -223,9 +262,16 @@ export default function DashboardPage() {
       <div>
         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3">{comparisonTitle}</h2>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {renderComparisonChart(t('dashboard.chartScore'), 'avg_score', maxComparisonScore, (v) => `${v.toFixed(1)}`)}
-          {renderComparisonChart(t('dashboard.chartAttendance'), 'avg_attendance', maxComparisonAttendance, (v) => `${v.toFixed(1)}%`)}
-          {renderComparisonChart(t('dashboard.chartProblems'), 'problem_records', maxComparisonProblems, (v) => `${Math.round(v)}`)}
+          {renderComparisonChart(t('dashboard.chartScore'), 'avg_score', maxComparisonScore, (v) => `${v.toFixed(1)}`, 'bg-gradient-to-b from-indigo-600 to-emerald-500 shadow-[0_10px_18px_rgba(79,70,229,0.25)]')}
+          {renderComparisonChart(t('dashboard.chartAttendance'), 'avg_attendance', maxComparisonAttendance, (v) => `${v.toFixed(1)}%`, 'bg-gradient-to-b from-yellow-400 to-orange-400 shadow-[0_10px_18px_rgba(234,179,8,0.25)]')}
+          {renderComparisonChart(
+            t('dashboard.chartProblems'),
+            'problem_records',
+            maxComparisonProblems,
+            (v) => `${Math.round(v)}`,
+            'bg-gradient-to-b from-red-500 to-rose-400 shadow-[0_10px_18px_rgba(239,68,68,0.25)]',
+            { dropZeroValues: true }
+          )}
         </div>
       </div>
     </div>

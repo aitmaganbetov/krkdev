@@ -345,14 +345,15 @@ def _get_cached_users_by_usernames(db, usernames: list[str]) -> list[dict]:
 
 
 def _build_ldap_filter(template: str, username: str) -> str:
+    escaped = _escape_ldap_filter_value(username)
     raw = (template or "").strip()
     if not raw:
-        return f"(sAMAccountName={username})"
+        return f"(sAMAccountName={escaped})"
     if "{username}" in raw:
-        return raw.replace("{username}", username)
+        return raw.replace("{username}", escaped)
     if raw.startswith("(") and raw.endswith(")"):
         return raw
-    return f"(sAMAccountName={username})"
+    return f"(sAMAccountName={escaped})"
 
 
 def _parse_ldap_server_url(server_url: str) -> tuple[str, int, bool]:
@@ -512,7 +513,7 @@ def _ldap_directory_profile_fallback(
             if cert_data:
                 tls = Tls(validate=ssl.CERT_REQUIRED, ca_certs_data=cert_data)
             else:
-                tls = Tls(validate=ssl.CERT_NONE)
+                tls = Tls(validate=ssl.CERT_REQUIRED)
 
         server = Server(host, port=port, use_ssl=use_ssl, tls=tls, get_info=ALL, connect_timeout=6)
         if bind_dn:
@@ -642,7 +643,7 @@ def _ldap_authenticate(username: str, password: str, settings: dict) -> tuple[bo
         if effective_base_dn:
             search_filters = [user_filter]
             if upn_suffix:
-                upn_value = f"{short_username}@{upn_suffix}"
+                upn_value = f"{_escape_ldap_filter_value(short_username)}@{_escape_ldap_filter_value(upn_suffix)}"
                 search_filters.append(f"(userPrincipalName={upn_value})")
                 search_filters.append(f"(mail={upn_value})")
 
@@ -820,8 +821,8 @@ def _ldap_authenticate(username: str, password: str, settings: dict) -> tuple[bo
         # to ensure display_name is populated with FIO from LDAP.
         if effective_base_dn and (not display_name or display_name == short_username):
             profile_filter = (
-                f"(&(objectClass=user)(|(sAMAccountName={short_username})"
-                f"(userPrincipalName={canonical_username})(mail={canonical_username})))"
+                f"(&(objectClass=user)(|(sAMAccountName={_escape_ldap_filter_value(short_username)})"
+                f"(userPrincipalName={_escape_ldap_filter_value(canonical_username)})(mail={_escape_ldap_filter_value(canonical_username)})))"
             )
 
             for profile_conn in [search_connection, user_connection]:

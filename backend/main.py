@@ -43,8 +43,8 @@ except Exception as e:
 app = FastAPI(
     title="KRK Monitoring System API",
     version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if os.getenv("ENABLE_API_DOCS", "false").strip().lower() in {"1", "true", "yes"} else None,
+    redoc_url="/redoc" if os.getenv("ENABLE_API_DOCS", "false").strip().lower() in {"1", "true", "yes"} else None,
 )
 
 app.add_middleware(

@@ -7,6 +7,8 @@ const resources = {
       // Nav
       nav: {
         dashboard: 'Дашборд',
+        monitoring: 'Мониторинг',
+        rooms: 'Настройка кабинетов',
         records: 'Записи',
         addRecord: 'Добавить запись',
         users: 'Пользователи',
@@ -349,6 +351,8 @@ const resources = {
     translation: {
       nav: {
         dashboard: 'Басқару тақтасы',
+        monitoring: 'Мониторинг',
+        rooms: 'Кабинеттерді баптау',
         records: 'Жазбалар',
         addRecord: 'Жазба қосу',
         users: 'Пайдаланушылар',
@@ -680,6 +684,8 @@ const resources = {
     translation: {
       nav: {
         dashboard: 'Dashboard',
+        monitoring: 'Monitoring',
+        rooms: 'Room settings',
         records: 'Records',
         addRecord: 'Add Record',
         users: 'Users',

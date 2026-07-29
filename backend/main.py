@@ -3,13 +3,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from migrations import import_faculties, migrate_records_submitted_by
 import os
 from database import engine, Base
-from routers import auth_router, catalogs_router, records_router, system_settings_router, users_router, audit_logs_router
+from routers import auth_router, catalogs_router, records_router, system_settings_router, users_router, audit_logs_router, rooms_router, violations_router, ai_router
 from services import require_roles, ROLE_ADMIN
 from services.audit_log import audit_event
 
 # Import all models to ensure they are registered with Base
 import models.record  # noqa: F401
 import models.audit_log  # noqa: F401
+import models.room  # noqa: F401
+import models.violation  # noqa: F401
+import models.violation_evidence  # noqa: F401
 
 
 def _read_csv_env(name: str, default: list[str]) -> list[str]:
@@ -61,6 +64,9 @@ app.include_router(records_router, prefix="/api")
 app.include_router(system_settings_router, prefix="/api")
 app.include_router(users_router, prefix="/api")
 app.include_router(audit_logs_router, prefix="/api")
+app.include_router(rooms_router, prefix="/api")
+app.include_router(violations_router, prefix="/api")
+app.include_router(ai_router, prefix="/api")
 
 
 @app.get("/health")

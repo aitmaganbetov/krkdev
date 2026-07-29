@@ -73,6 +73,9 @@ export const getDashboardFacultyComparison = (params) =>
 export const getBasicInfoCatalog = () =>
   api.get('/catalogs/basic-info').then((r) => r.data)
 
+export const getPlatonusStatus = () =>
+  api.get('/catalogs/platonus-status').then((r) => r.data)
+
 export const getLdapSettings = () =>
   api.get('/settings/ldap').then((r) => r.data)
 
@@ -81,6 +84,56 @@ export const saveLdapSettings = (data) =>
 
 export const testLdapSettings = (data) =>
   api.post('/settings/ldap/test', data).then((r) => r.data)
+
+export const getAiSettings = () =>
+  api.get('/ai/settings').then((r) => r.data)
+
+export const saveAiSettings = (data) =>
+  api.patch('/ai/settings', data).then((r) => r.data)
+
+export const testAiProvider = (provider) =>
+  api.post(`/ai/test/${provider}`).then((r) => r.data)
+
+export const improveViolationText = (text) =>
+  api.post('/ai/improve', { text }).then((r) => r.data)
+
+export const getRooms = () =>
+  api.get('/rooms').then((r) => r.data)
+
+export const createRoom = (data) =>
+  api.post('/rooms', data).then((r) => r.data)
+
+export const updateRoom = (id, data) =>
+  api.patch(`/rooms/${id}`, data).then((r) => r.data)
+
+export const deleteRoom = (id) =>
+  api.delete(`/rooms/${id}`)
+
+export const testRoomCamera = (id) =>
+  api.post(`/rooms/${id}/camera/test`).then((r) => r.data)
+
+export const getViolations = () =>
+  api.get('/violations').then((r) => r.data)
+
+export const createViolation = (data) =>
+  api.post('/violations', data).then((r) => r.data)
+
+export const reviewViolation = (id, status, comment = '') =>
+  api.patch(`/violations/${id}/review`, { status, comment }).then((r) => r.data)
+
+export const uploadViolationAct = (id, file) => {
+  const form = new FormData()
+  form.append('file', file)
+  return api.post(`/violations/${id}/act`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }).then((r) => r.data)
+}
+
+export const captureRoomPhoto = (id) =>
+  api.post(`/rooms/${id}/camera/photo`).then((r) => r.data)
+
+export const recordRoomVideo = (id, duration = 10) =>
+  api.post(`/rooms/${id}/camera/video`, null, { params: { duration } }).then((r) => r.data)
 
 export const getLdapUsers = () =>
   api.get('/users/ldap').then((r) => r.data)

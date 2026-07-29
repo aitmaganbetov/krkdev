@@ -1,15 +1,131 @@
 from collections import OrderedDict
+from datetime import datetime, timezone
+import os
+from time import monotonic
 
+import pymysql
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from database import get_db
 from schemas.catalog import BasicInfoCatalogOut
-from services import get_current_user
+from migrations import get_remote_config
+from services import ROLE_ADMIN, get_current_user, require_roles
 
 router = APIRouter(prefix="/catalogs", tags=["catalogs"])
+
+
+class CatalogIntegrationItem(BaseModel):
+    key: str
+    label: str
+    local_count: int | None = None
+    remote_count: int | None = None
+    status: str
+
+
+class PlatonusIntegrationStatus(BaseModel):
+    connected: bool
+    status: str
+    message: str
+    database: str
+    response_ms: int | None = None
+    checked_at: str
+    catalogs: list[CatalogIntegrationItem]
+
+
+CATALOG_TABLES = (
+    ("faculties", "Факультеты"),
+    ("specializations", "Образовательные программы"),
+    ("groups", "Группы"),
+    ("tutors", "Преподаватели"),
+)
+
+
+def _local_catalog_counts(db: Session) -> dict[str, int | None]:
+    counts = {}
+    for table_name, _ in CATALOG_TABLES:
+        try:
+            counts[table_name] = int(
+                db.execute(text(f"SELECT COUNT(*) FROM `{table_name}`")).scalar() or 0
+            )
+        except SQLAlchemyError:
+            db.rollback()
+            counts[table_name] = None
+    return counts
+
+
+@router.get("/platonus-status", response_model=PlatonusIntegrationStatus)
+def get_platonus_integration_status(
+    db: Session = Depends(get_db),
+    _: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+):
+    checked_at = datetime.now(timezone.utc).isoformat()
+    local_counts = _local_catalog_counts(db)
+    remote_counts: dict[str, int | None] = {key: None for key, _ in CATALOG_TABLES}
+    started = monotonic()
+
+    try:
+        config = get_remote_config()
+        connection = pymysql.connect(
+            **config,
+            connect_timeout=5,
+            read_timeout=5,
+            write_timeout=5,
+        )
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT DATABASE()")
+                database_name = str(cursor.fetchone()[0] or config["database"])
+                for table_name, _ in CATALOG_TABLES:
+                    cursor.execute(f"SELECT COUNT(*) FROM `{table_name}`")
+                    remote_counts[table_name] = int(cursor.fetchone()[0] or 0)
+        finally:
+            connection.close()
+
+        response_ms = round((monotonic() - started) * 1000)
+        connected = True
+        message = "Подключение к Platonus установлено"
+    except Exception as exc:
+        response_ms = round((monotonic() - started) * 1000)
+        connected = False
+        database_name = os.getenv("READONLY_DB_NAME", "nitro")
+        if isinstance(exc, pymysql.err.OperationalError):
+            message = "Нет подключения к базе Platonus. Проверьте адрес, порт и доступность сервера."
+        else:
+            message = "Не удалось проверить справочники Platonus"
+
+    catalogs = []
+    for table_name, label in CATALOG_TABLES:
+        local_count = local_counts[table_name]
+        remote_count = remote_counts[table_name]
+        if not connected:
+            item_status = "unavailable"
+        elif local_count is None:
+            item_status = "local_error"
+        elif local_count == remote_count:
+            item_status = "synced"
+        else:
+            item_status = "outdated"
+        catalogs.append(CatalogIntegrationItem(
+            key=table_name,
+            label=label,
+            local_count=local_count,
+            remote_count=remote_count,
+            status=item_status,
+        ))
+
+    return PlatonusIntegrationStatus(
+        connected=connected,
+        status="online" if connected else "offline",
+        message=message,
+        database=database_name,
+        response_ms=response_ms,
+        checked_at=checked_at,
+        catalogs=catalogs,
+    )
 
 
 @router.get("/basic-info", response_model=BasicInfoCatalogOut)

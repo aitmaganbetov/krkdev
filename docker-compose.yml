@@ -25,6 +25,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - ./backend/media:/app/media
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   frontend:
     build:
@@ -55,7 +59,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "5174:5173"
+      - "5175:5173"
 
 volumes:
   mysql_data:

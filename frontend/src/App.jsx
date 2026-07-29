@@ -12,6 +12,8 @@ import { ThemeProvider } from './context/ThemeContext'
 import Layout           from './components/Layout'
 import LoginPage        from './pages/LoginPage'
 import DashboardPage    from './pages/DashboardPage'
+import MonitoringPage   from './pages/MonitoringPage'
+import RoomsSettingsPage from './pages/RoomsSettingsPage'
 import RecordsPage      from './pages/RecordsPage'
 import RecordDetailPage from './pages/RecordDetailPage'
 import CreateRecordPage from './pages/CreateRecordPage'
@@ -50,6 +52,8 @@ export default function App() {
             <Route element={<Layout />}>
               <Route index element={<HomeRedirect />} />
               <Route path="/dashboard"         element={<RoleGuard allowedRoles={["admin", "inspector"]}><DashboardPage /></RoleGuard>} />
+              <Route path="/monitoring"        element={<RoleGuard allowedRoles={["admin", "inspector"]}><MonitoringPage /></RoleGuard>} />
+              <Route path="/rooms-settings"    element={<RoleGuard allowedRoles={["admin"]}><RoomsSettingsPage /></RoleGuard>} />
               <Route path="/records"           element={<RecordsPage />} />
               <Route path="/records/new"       element={<CreateRecordPage />} />
               <Route path="/records/:id"       element={<RecordDetailPage />} />

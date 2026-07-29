@@ -16,6 +16,17 @@ const navItems = [
     ),
   },
   {
+    to: '/monitoring',
+    labelKey: 'nav.monitoring',
+    roles: ['admin', 'inspector'],
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M4 19V9m5 10V5m5 14v-7m5 7V3" />
+      </svg>
+    ),
+  },
+  {
     to: '/records',
     labelKey: 'nav.records',
     roles: ['admin', 'inspector', 'staff'],
@@ -23,17 +34,6 @@ const navItems = [
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
           d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-      </svg>
-    ),
-  },
-  {
-    to: '/records/new',
-    labelKey: 'nav.addRecord',
-    roles: ['admin', 'inspector', 'staff'],
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-          d="M12 4v16m8-8H4" />
       </svg>
     ),
   },
@@ -69,6 +69,17 @@ const navItems = [
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
           d="M11.049 2.927c.3-1.14 1.603-1.14 1.902 0l.294 1.117a1 1 0 00.95.69h1.175c1.2 0 1.7 1.54.74 2.26l-.942.706a1 1 0 00-.364 1.118l.36 1.108c.37 1.136-.92 2.08-1.89 1.38l-.95-.69a1 1 0 00-1.176 0l-.95.69c-.97.7-2.26-.244-1.89-1.38l.36-1.108a1 1 0 00-.364-1.118l-.942-.706c-.96-.72-.46-2.26.74-2.26h1.175a1 1 0 00.95-.69l.294-1.117z" />
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15a3 3 0 100-6 3 3 0 000 6z" />
+      </svg>
+    ),
+  },
+  {
+    to: '/rooms-settings',
+    labelKey: 'nav.rooms',
+    roles: ['admin'],
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M3 21h18M5 21V5a2 2 0 012-2h7a2 2 0 012 2v16M9 8h3m-3 4h3m-3 4h3m7-7h-3m3 4h-3m3 4h-3" />
       </svg>
     ),
   },

@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential default-libmysqlclient-dev \
+    && apt-get install -y --no-install-recommends build-essential default-libmysqlclient-dev ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

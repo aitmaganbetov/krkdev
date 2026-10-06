@@ -7,6 +7,7 @@ const navItems = [
   {
     to: '/dashboard',
     labelKey: 'nav.dashboard',
+    group: 'overview',
     roles: ['admin', 'inspector'],
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -18,6 +19,7 @@ const navItems = [
   {
     to: '/monitoring',
     labelKey: 'nav.monitoring',
+    group: 'overview',
     roles: ['admin', 'inspector'],
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -29,6 +31,7 @@ const navItems = [
   {
     to: '/records',
     labelKey: 'nav.records',
+    group: 'workspace',
     roles: ['admin', 'inspector', 'staff'],
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -40,6 +43,7 @@ const navItems = [
   {
     to: '/users',
     labelKey: 'nav.users',
+    group: 'administration',
     roles: ['admin'],
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -51,6 +55,7 @@ const navItems = [
   {
     to: '/ldap-users',
     labelKey: 'nav.ldapUsers',
+    group: 'administration',
     roles: ['admin'],
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -63,6 +68,7 @@ const navItems = [
   {
     to: '/settings',
     labelKey: 'nav.settings',
+    group: 'administration',
     roles: ['admin'],
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -75,6 +81,7 @@ const navItems = [
   {
     to: '/rooms-settings',
     labelKey: 'nav.rooms',
+    group: 'administration',
     roles: ['admin'],
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -86,6 +93,7 @@ const navItems = [
   {
     to: '/audit-logs',
     labelKey: 'nav.auditLogs',
+    group: 'administration',
     roles: ['admin'],
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -97,7 +105,7 @@ const navItems = [
 ]
 
 export default function Sidebar({ mobileOpen, onMobileClose, collapsed, onToggleCollapse }) {
-  const { logout, role } = useAuth()
+  const { logout, role, currentUser } = useAuth()
   const { dark, toggle } = useTheme()
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
@@ -118,27 +126,34 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed, onToggle
   }
 
   const navLinkClass = ({ isActive }) =>
-    `flex items-center ${collapsed ? 'lg:justify-center' : ''} gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+    `group flex min-h-11 cursor-pointer items-center ${collapsed ? 'lg:justify-center' : ''} gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-[background-color,color,box-shadow] duration-200 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 dark:focus:ring-cyan-400 dark:focus:ring-offset-[#0b1220] ${
       isActive
-        ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 shadow-sm'
-        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100'
+        ? '[background:var(--md-sys-color-primary)] [color:var(--md-sys-color-on-primary)] shadow-[0_6px_16px_rgba(28,71,120,0.24)]'
+        : '[color:var(--md-sys-color-on-surface-variant)] hover:[background:var(--md-sys-color-surface-container)] hover:[color:var(--md-sys-color-on-surface)]'
     }`
+
+  const visibleItems = navItems.filter((item) => item.roles.includes(role))
+  const groups = ['overview', 'workspace', 'administration']
+  const initials = (currentUser || 'KR').trim().slice(0, 2).toUpperCase()
 
   const sidebarBody = (
     <>
-      <div className="px-4 py-4 border-b border-indigo-100/70 dark:border-gray-800 flex items-center justify-between gap-2">
-        <div className={`min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
-          <span className="text-lg font-bold text-primary-600 dark:text-primary-400 tracking-tight">
-            KRK Мониторинг
-          </span>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{t('sidebar.subtitle')}</p>
+      <div className={`flex min-h-[82px] items-center gap-2 border-b border-slate-200/80 dark:border-[#24344d] ${collapsed ? 'px-4 lg:justify-center lg:px-2' : 'justify-between px-4'}`}>
+        <div className={`min-w-0 items-center gap-3 ${collapsed ? 'flex lg:hidden' : 'flex'}`}>
+          <div className="md3-brand-mark grid h-11 w-11 shrink-0 place-items-center rounded-xl text-sm font-extrabold">KR</div>
+          <div className={`min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
+            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary-700 dark:text-primary-300">KRK • UNIVERSITY</p>
+            <span className="mt-0.5 block truncate text-sm font-bold tracking-tight text-slate-950 dark:text-white">{t('sidebar.productName')}</span>
+            <p className="mt-0.5 truncate text-[11px] text-slate-500 dark:text-[#8294af]">{t('sidebar.productSubtitle')}</p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className={`flex items-center gap-1 ${collapsed ? 'lg:w-full lg:justify-center' : ''}`}>
           <button
             onClick={onToggleCollapse}
-            className="hidden lg:inline-flex p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+            className="hidden min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600 dark:hover:bg-[#142033] lg:inline-flex"
             title={collapsed ? t('sidebar.expand') : t('sidebar.collapse')}
+            aria-label={collapsed ? t('sidebar.expand') : t('sidebar.collapse')}
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               {collapsed
@@ -148,7 +163,7 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed, onToggle
           </button>
           <button
             onClick={onMobileClose}
-            className="lg:hidden inline-flex p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+            className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600 dark:hover:bg-[#142033] lg:hidden"
             aria-label={t('sidebar.closeMenu')}>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -157,22 +172,34 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed, onToggle
         </div>
       </div>
 
-      <nav className="flex-1 px-3 py-4 space-y-1">
-        {navItems.map((item) => (
-          item.roles.includes(role) ? (
-          <NavLink key={item.to} to={item.to} onClick={handleNavigate} className={navLinkClass} title={collapsed ? t(item.labelKey) : undefined}>
-            {item.icon}
-            <span className={collapsed ? 'lg:hidden' : ''}>{t(item.labelKey)}</span>
-          </NavLink>
-          ) : null
-        ))}
+      <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3" aria-label={t('sidebar.mainNavigation')}>
+        {groups.map((group, groupIndex) => {
+          const items = visibleItems.filter((item) => item.group === group)
+          if (!items.length) return null
+          return (
+            <div key={group} className={groupIndex ? 'mt-3' : ''}>
+              <p className={`px-3 pb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400 dark:text-[#71839e] ${collapsed ? 'lg:hidden' : ''}`}>
+                {t(`sidebar.groups.${group}`)}
+              </p>
+              <div className="space-y-1">
+                {items.map((item) => (
+                  <NavLink key={item.to} to={item.to} onClick={handleNavigate} className={navLinkClass} title={collapsed ? t(item.labelKey) : undefined}>
+                    <span className="shrink-0 transition-transform duration-200 group-hover:translate-x-0.5">{item.icon}</span>
+                    <span className={`min-w-0 truncate ${collapsed ? 'lg:hidden' : ''}`}>{t(item.labelKey)}</span>
+                  </NavLink>
+                ))}
+              </div>
+            </div>
+          )
+        })}
       </nav>
 
-      <div className="px-3 py-4 border-t border-indigo-100/70 dark:border-gray-800 space-y-1">
+      <div className="shrink-0 space-y-1.5 border-t border-slate-200/80 p-3 dark:border-[#24344d]">
         <button
           onClick={toggle}
-          className={`flex items-center ${collapsed ? 'lg:justify-center' : ''} gap-3 w-full px-3 py-2.5 rounded-xl text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100 transition-colors`}
+          className={`flex min-h-11 w-full cursor-pointer items-center ${collapsed ? 'lg:justify-center' : ''} gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus:ring-2 focus:ring-blue-600 dark:text-slate-400 dark:hover:bg-[#142033] dark:hover:text-white`}
           title={collapsed ? (dark ? t('sidebar.lightTheme') : t('sidebar.darkTheme')) : undefined}
+          aria-label={dark ? t('sidebar.lightTheme') : t('sidebar.darkTheme')}
         >
           {dark ? (
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -188,33 +215,46 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed, onToggle
           <span className={collapsed ? 'lg:hidden' : ''}>{dark ? t('sidebar.lightTheme') : t('sidebar.darkTheme')}</span>
         </button>
 
-        <div className={`flex items-center ${collapsed ? 'lg:hidden' : ''} gap-1 px-3 py-1`}>
+        <div className={`grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-1 dark:bg-[#111c2e] ${collapsed ? 'lg:hidden' : ''}`} aria-label={t('sidebar.language')}>
           {['ru', 'kz', 'en'].map((lng) => (
             <button
               key={lng}
               onClick={() => changeLang(lng)}
-              className={`flex-1 py-1 rounded-lg text-xs font-semibold uppercase transition-colors ${
+              className={`min-h-9 cursor-pointer rounded-md text-[11px] font-bold uppercase transition-colors focus:outline-none focus:ring-2 focus:ring-blue-600 ${
                 i18n.language === lng
-                  ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300'
-                  : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                  ? 'bg-white text-blue-700 shadow-sm dark:bg-[#24344d] dark:text-cyan-300'
+                  : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
               }`}
+              aria-pressed={i18n.language === lng}
             >
               {lng}
             </button>
           ))}
         </div>
 
-        <button
-          onClick={handleLogout}
-          className={`flex items-center ${collapsed ? 'lg:justify-center' : ''} gap-3 w-full px-3 py-2.5 rounded-xl text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors`}
-          title={collapsed ? t('sidebar.logout') : undefined}
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-          </svg>
-          <span className={collapsed ? 'lg:hidden' : ''}>{t('sidebar.logout')}</span>
-        </button>
+        <div className={`flex min-w-0 items-center gap-2 overflow-hidden rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-[#24344d] dark:bg-[#111c2e] ${collapsed ? 'lg:justify-center lg:border-0 lg:bg-transparent lg:p-0 dark:lg:bg-transparent' : ''}`}>
+          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-slate-900 text-xs font-bold text-white dark:bg-cyan-400 dark:text-slate-950">{initials}</div>
+          <div className={`min-w-0 flex-1 ${collapsed ? 'lg:hidden' : ''}`}>
+            <p className="truncate text-xs font-bold text-slate-900 dark:text-white" title={currentUser || undefined}>{currentUser || '—'}</p>
+            <p className="mt-0.5 truncate text-[10px] uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">{role || 'staff'}</p>
+          </div>
+          <button onClick={handleLogout}
+            className={`grid min-h-11 min-w-11 shrink-0 cursor-pointer place-items-center rounded-lg text-red-600 transition-colors hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:text-red-400 dark:hover:bg-red-950/40 ${collapsed ? 'lg:hidden' : ''}`}
+            title={t('sidebar.logout')} aria-label={t('sidebar.logout')}>
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+          </button>
+        </div>
+        {collapsed && (
+          <button onClick={handleLogout}
+            className="hidden min-h-11 w-full cursor-pointer items-center justify-center rounded-lg text-red-600 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 dark:text-red-400 dark:hover:bg-red-950/30 lg:flex"
+            title={t('sidebar.logout')} aria-label={t('sidebar.logout')}>
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+          </button>
+        )}
       </div>
     </>
   )
@@ -229,12 +269,12 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed, onToggle
         />
       )}
 
-      <aside className={`lg:hidden fixed inset-y-0 left-0 z-40 w-72 bg-white dark:bg-gray-900 border-r border-indigo-100/80 dark:border-gray-800 shadow-[0_20px_40px_rgba(79,70,229,0.25)] transform transition-transform duration-300 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="h-full flex flex-col">{sidebarBody}</div>
+      <aside id="mobile-sidebar" className={`fixed inset-y-0 left-0 z-40 w-[min(20rem,88vw)] overflow-hidden border-r [border-color:var(--md-sys-color-outline-variant)] [background:var(--md-sys-color-surface-container-low)] shadow-[0_20px_50px_rgba(2,6,23,0.3)] transition-transform duration-300 lg:hidden ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="flex h-full min-h-0 flex-col">{sidebarBody}</div>
       </aside>
 
-      <aside className={`hidden lg:flex lg:flex-col min-h-screen m-3 rounded-3xl border border-indigo-100/80 dark:border-gray-800 bg-white/95 dark:bg-gray-900/95 backdrop-blur shadow-[0_12px_35px_rgba(79,70,229,0.12)] transition-all duration-300 ${collapsed ? 'w-20' : 'w-72'}`}>
-        {sidebarBody}
+      <aside className={`fixed bottom-3 left-3 top-3 hidden overflow-hidden rounded-[22px] border [border-color:var(--md-sys-color-outline-variant)] [background:var(--md-sys-color-surface-container-low)] shadow-[var(--md-sys-elevation-2)] transition-all duration-300 lg:flex ${collapsed ? 'w-20' : 'w-80'}`}>
+        <div className="flex h-full min-h-0 flex-col">{sidebarBody}</div>
       </aside>
     </>
   )

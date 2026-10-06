@@ -128,7 +128,7 @@ export default function EditRecordPage() {
   }
 
   return (
-    <div className="mx-auto">
+    <div className="w-full">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t('createRecord.editTitle')} #{id}</h1>
       </div>

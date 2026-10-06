@@ -43,6 +43,19 @@ export default function RoomsSettingsPage() {
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
 
+  useEffect(() => {
+    if (!showForm) return
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setShowForm(false)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [showForm])
+
   const loadRooms = () => {
     setLoading(true)
     getRooms()
@@ -139,6 +152,11 @@ export default function RoomsSettingsPage() {
     }
   }
 
+  const closeForm = () => {
+    setShowForm(false)
+    setEditingId(null)
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -158,36 +176,44 @@ export default function RoomsSettingsPage() {
       {error && <div className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">{error}</div>}
 
       {showForm && (
-        <form onSubmit={save} className="card overflow-hidden">
-          <div className="border-b border-gray-200 bg-gradient-to-r from-indigo-50 to-cyan-50 px-5 py-4 dark:border-gray-800 dark:from-indigo-950/40 dark:to-cyan-950/30">
-            <h2 className="font-bold text-gray-900 dark:text-white">{editingId ? 'Редактирование кабинета' : 'Новый кабинет'}</h2>
-          </div>
-          <div className="grid gap-4 p-5 md:grid-cols-2">
-            <label><span className="label">Номер / название *</span><input required className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Например, 1002-1" /></label>
-            <label><span className="label">Корпус</span><input className="input" value={form.building} onChange={(e) => setForm({ ...form, building: e.target.value })} placeholder="Главный корпус" /></label>
-            <label><span className="label">Этаж</span><input className="input" value={form.floor} onChange={(e) => setForm({ ...form, floor: e.target.value })} placeholder="1" /></label>
-            <label><span className="label">Вместимость</span><input type="number" min="0" className="input" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} /></label>
-            <label className="md:col-span-2"><span className="label">Что находится внутри</span><textarea className="input min-h-24" value={form.equipment} onChange={(e) => setForm({ ...form, equipment: e.target.value })} placeholder="Интерактивная панель, проектор, 25 компьютеров, микрофон..." /></label>
-            <label className="md:col-span-2"><span className="label">Примечание</span><textarea className="input min-h-20" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
-          </div>
-
-          <div className="border-t border-gray-200 bg-slate-50/70 p-5 dark:border-gray-800 dark:bg-gray-950/40">
-            <label className="mb-4 flex cursor-pointer items-center gap-3">
-              <input type="checkbox" className="h-4 w-4 rounded text-indigo-600" checked={form.camera_enabled} onChange={(e) => setForm({ ...form, camera_enabled: e.target.checked })} />
-              <span><span className="block text-sm font-bold text-gray-900 dark:text-white">Камера подключена</span><span className="block text-xs text-gray-500">Включить интеграцию камеры для этого кабинета</span></span>
-            </label>
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="md:col-span-2"><span className="label">API URL камеры</span><input className="input" value={form.camera_api_url} onChange={(e) => setForm({ ...form, camera_api_url: e.target.value })} placeholder="https://camera.local/api/status" /></label>
-              <label className="md:col-span-2"><span className="label">URL видеопотока</span><input className="input" value={form.camera_stream_url} onChange={(e) => setForm({ ...form, camera_stream_url: e.target.value })} placeholder="rtsp://camera.local/stream или https://.../hls.m3u8" /></label>
-              <label><span className="label">Логин камеры</span><input className="input" value={form.camera_username} onChange={(e) => setForm({ ...form, camera_username: e.target.value })} autoComplete="off" /></label>
-              <label><span className="label">Пароль / API-ключ</span><input type="password" className="input" value={form.camera_api_key} onChange={(e) => setForm({ ...form, camera_api_key: e.target.value })} placeholder={editingId ? 'Оставьте пустым, чтобы не менять' : '••••••••'} autoComplete="new-password" /><span className="mt-1 block text-xs text-gray-400">Для UNV используется Digest-авторизация по логину и паролю</span></label>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm" onClick={closeForm}>
+          <form onSubmit={save} className="w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl dark:bg-gray-900" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-start justify-between gap-4 border-b border-gray-200 bg-gradient-to-r from-indigo-50 to-cyan-50 px-5 py-4 dark:border-gray-800 dark:from-indigo-950/40 dark:to-cyan-950/30">
+              <div>
+                <h2 className="font-bold text-gray-900 dark:text-white">{editingId ? 'Редактирование кабинета' : 'Новый кабинет'}</h2>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Форма открытия в модальном окне</p>
+              </div>
+              <button type="button" className="btn-secondary" onClick={closeForm}>Закрыть</button>
             </div>
-          </div>
-          <div className="flex justify-end gap-2 border-t border-gray-200 px-5 py-4 dark:border-gray-800">
-            <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>Отмена</button>
-            <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Сохранение...' : 'Сохранить'}</button>
-          </div>
-        </form>
+            <div className="max-h-[calc(100vh-220px)] overflow-y-auto">
+              <div className="grid gap-4 p-5 md:grid-cols-2">
+                <label><span className="label">Номер / название *</span><input required className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Например, 1002-1" /></label>
+                <label><span className="label">Корпус</span><input className="input" value={form.building} onChange={(e) => setForm({ ...form, building: e.target.value })} placeholder="Главный корпус" /></label>
+                <label><span className="label">Этаж</span><input className="input" value={form.floor} onChange={(e) => setForm({ ...form, floor: e.target.value })} placeholder="1" /></label>
+                <label><span className="label">Вместимость</span><input type="number" min="0" className="input" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} /></label>
+                <label className="md:col-span-2"><span className="label">Что находится внутри</span><textarea className="input min-h-24" value={form.equipment} onChange={(e) => setForm({ ...form, equipment: e.target.value })} placeholder="Интерактивная панель, проектор, 25 компьютеров, микрофон..." /></label>
+                <label className="md:col-span-2"><span className="label">Примечание</span><textarea className="input min-h-20" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
+              </div>
+
+              <div className="border-t border-gray-200 bg-slate-50/70 p-5 dark:border-gray-800 dark:bg-gray-950/40">
+                <label className="mb-4 flex cursor-pointer items-center gap-3">
+                  <input type="checkbox" className="h-4 w-4 rounded text-indigo-600" checked={form.camera_enabled} onChange={(e) => setForm({ ...form, camera_enabled: e.target.checked })} />
+                  <span><span className="block text-sm font-bold text-gray-900 dark:text-white">Камера подключена</span><span className="block text-xs text-gray-500">Включить интеграцию камеры для этого кабинета</span></span>
+                </label>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="md:col-span-2"><span className="label">API URL камеры</span><input className="input" value={form.camera_api_url} onChange={(e) => setForm({ ...form, camera_api_url: e.target.value })} placeholder="https://camera.local/api/status" /></label>
+                  <label className="md:col-span-2"><span className="label">URL видеопотока</span><input className="input" value={form.camera_stream_url} onChange={(e) => setForm({ ...form, camera_stream_url: e.target.value })} placeholder="rtsp://camera.local/stream или https://.../hls.m3u8" /></label>
+                  <label><span className="label">Логин камеры</span><input className="input" value={form.camera_username} onChange={(e) => setForm({ ...form, camera_username: e.target.value })} autoComplete="off" /></label>
+                  <label><span className="label">Пароль / API-ключ</span><input type="password" className="input" value={form.camera_api_key} onChange={(e) => setForm({ ...form, camera_api_key: e.target.value })} placeholder={editingId ? 'Оставьте пустым, чтобы не менять' : '••••••••'} autoComplete="new-password" /><span className="mt-1 block text-xs text-gray-400">Для UNV используется Digest-авторизация по логину и паролю</span></label>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-gray-200 px-5 py-4 dark:border-gray-800">
+              <button type="button" className="btn-secondary" onClick={closeForm}>Отмена</button>
+              <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Сохранение...' : 'Сохранить'}</button>
+            </div>
+          </form>
+        </div>
       )}
 
       {loading ? (

@@ -12,8 +12,9 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from schemas.catalog import BasicInfoCatalogOut
-from migrations import get_remote_config
+from migrations import get_remote_config, sync_platonus_catalogs
 from services import ROLE_ADMIN, get_current_user, require_roles
+from services.audit_log import audit_event
 
 router = APIRouter(prefix="/catalogs", tags=["catalogs"])
 
@@ -42,6 +43,13 @@ CATALOG_TABLES = (
     ("groups", "Группы"),
     ("tutors", "Преподаватели"),
 )
+
+REMOTE_COUNT_QUERIES = {
+    "faculties": "SELECT COUNT(*) FROM faculties",
+    "specializations": "SELECT COUNT(*) FROM specializations WHERE is_default = 0 AND deleted IS NULL",
+    "groups": "SELECT COUNT(*) FROM `groups`",
+    "tutors": "SELECT COUNT(*) FROM tutors WHERE has_access = 1",
+}
 
 
 def _local_catalog_counts(db: Session) -> dict[str, int | None]:
@@ -80,7 +88,7 @@ def get_platonus_integration_status(
                 cursor.execute("SELECT DATABASE()")
                 database_name = str(cursor.fetchone()[0] or config["database"])
                 for table_name, _ in CATALOG_TABLES:
-                    cursor.execute(f"SELECT COUNT(*) FROM `{table_name}`")
+                    cursor.execute(REMOTE_COUNT_QUERIES[table_name])
                     remote_counts[table_name] = int(cursor.fetchone()[0] or 0)
         finally:
             connection.close()
@@ -126,6 +134,23 @@ def get_platonus_integration_status(
         checked_at=checked_at,
         catalogs=catalogs,
     )
+
+
+@router.post("/platonus-sync")
+def sync_platonus_integration_catalogs(
+    context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+):
+    result = sync_platonus_catalogs()
+    success = result.get("status") == "success"
+    audit_event(
+        action="catalogs.platonus.sync",
+        outcome="success" if success else "failure",
+        actor=context.get("username"),
+        details={"counts": result.get("counts"), "message": result.get("message")},
+    )
+    if not success:
+        raise HTTPException(status_code=502, detail=result.get("message"))
+    return result
 
 
 @router.get("/basic-info", response_model=BasicInfoCatalogOut)

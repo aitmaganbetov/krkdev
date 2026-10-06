@@ -4,18 +4,20 @@ const ThemeContext = createContext(null)
 
 export function ThemeProvider({ children }) {
   const [dark, setDark] = useState(() => {
-    const saved = localStorage.getItem('theme')
-    return saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches
+    const saved = localStorage.getItem('krk-white-control-theme')
+    // White is the primary operating mode. Dark mode remains available for long
+    // video-review sessions but no longer inherits the previous prototype theme.
+    return saved ? saved === 'dark' : false
   })
 
   useEffect(() => {
     const root = document.documentElement
     if (dark) {
       root.classList.add('dark')
-      localStorage.setItem('theme', 'dark')
+      localStorage.setItem('krk-white-control-theme', 'dark')
     } else {
       root.classList.remove('dark')
-      localStorage.setItem('theme', 'light')
+      localStorage.setItem('krk-white-control-theme', 'light')
     }
   }, [dark])
 

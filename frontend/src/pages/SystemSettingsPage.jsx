@@ -7,6 +7,7 @@ import {
   getLdapSettings,
   saveAiSettings,
   saveLdapSettings,
+  syncPlatonusCatalogs,
   testAiProvider,
   testLdapSettings,
 } from '../services/api'
@@ -42,6 +43,8 @@ export default function SystemSettingsPage() {
   const [error, setError] = useState('')
   const [platonusStatus, setPlatonusStatus] = useState(null)
   const [platonusError, setPlatonusError] = useState('')
+  const [platonusSyncing, setPlatonusSyncing] = useState(false)
+  const [platonusNotice, setPlatonusNotice] = useState('')
   const [ldapLoading, setLdapLoading] = useState(true)
   const [ldapSaving, setLdapSaving] = useState(false)
   const [ldapTesting, setLdapTesting] = useState(false)
@@ -135,6 +138,21 @@ export default function SystemSettingsPage() {
 
   const updateLdap = (patch) => {
     setLdap((prev) => ({ ...prev, ...patch }))
+  }
+
+  const handlePlatonusSync = async () => {
+    setPlatonusSyncing(true)
+    setPlatonusNotice('')
+    setPlatonusError('')
+    try {
+      const result = await syncPlatonusCatalogs()
+      setPlatonusNotice(result.message || 'Справочники Platonus синхронизированы')
+      await load()
+    } catch (err) {
+      setPlatonusError(err.response?.data?.detail || 'Не удалось синхронизировать справочники Platonus')
+    } finally {
+      setPlatonusSyncing(false)
+    }
   }
 
   const handleSaveLdap = async () => {
@@ -240,9 +258,20 @@ export default function SystemSettingsPage() {
             <h2 className="font-semibold text-gray-900 dark:text-gray-100">Интеграция с Platonus</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Доступность подключения и состояние синхронизации справочников</p>
           </div>
-          <button className="btn-secondary" onClick={load} disabled={loading}>
-            {loading ? 'Проверка...' : 'Проверить подключение'}
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button className="btn-secondary" onClick={load} disabled={loading || platonusSyncing}>
+              {loading ? 'Проверка...' : 'Проверить подключение'}
+            </button>
+            <button
+              className="btn-primary"
+              onClick={handlePlatonusSync}
+              disabled={loading || platonusSyncing || !platonusStatus?.connected}
+              title={!platonusStatus?.connected ? 'Сначала установите подключение к Platonus' : undefined}
+            >
+              {platonusSyncing && <Spinner size="sm" />}
+              {platonusSyncing ? 'Синхронизация...' : 'Синхронизировать'}
+            </button>
+          </div>
         </div>
 
         {platonusStatus && (
@@ -262,6 +291,7 @@ export default function SystemSettingsPage() {
         )}
 
         {platonusError && <p className="mt-4 text-sm text-red-500">{platonusError}</p>}
+        {platonusNotice && <p className="mt-4 text-sm font-medium text-emerald-600 dark:text-emerald-400" role="status">{platonusNotice}</p>}
         {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
 
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">

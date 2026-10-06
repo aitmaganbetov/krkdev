@@ -15,6 +15,7 @@ export default function UsersPage() {
   const [savingBlockFor, setSavingBlockFor] = useState('')
   const [deletingUserFor, setDeletingUserFor] = useState('')
   const [creating, setCreating] = useState(false)
+  const [showCreateModal, setShowCreateModal] = useState(false)
   const [editingUser, setEditingUser] = useState(null)
   const [newUser, setNewUser] = useState({ username: '', display_name: '', password: '', role: 'staff' })
   const [editForm, setEditForm] = useState({ display_name: '', password: '', role: 'staff' })
@@ -67,6 +68,16 @@ export default function UsersPage() {
     } finally {
       setCreating(false)
     }
+  }
+
+  const openCreateModal = () => {
+    setError('')
+    setShowCreateModal(true)
+  }
+
+  const closeCreateModal = () => {
+    if (creating) return
+    setShowCreateModal(false)
   }
 
   const handleToggleBlock = async (user) => {
@@ -144,16 +155,21 @@ export default function UsersPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t('users.title')}</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             {t('users.subtitle')}
           </p>
         </div>
-        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300">
-          {t('users.total', {count: filtered.length})}
-        </span>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300">
+            {t('users.total', {count: filtered.length})}
+          </span>
+          <button className="btn-primary" onClick={openCreateModal}>
+            {t('users.addBtn')}
+          </button>
+        </div>
       </div>
 
       <div className="card p-4">
@@ -180,46 +196,82 @@ export default function UsersPage() {
         </select>
       </div>
 
-      <div className="card p-4">
-        <h2 className="font-semibold text-gray-900 dark:text-white mb-3">{t('users.addTitle')}</h2>
-        <form className="grid grid-cols-1 md:grid-cols-4 gap-3" onSubmit={handleCreateUser}>
-          <input
-            className="input"
-            placeholder={t('users.loginPlaceholder')}
-            value={newUser.username}
-            onChange={(e) => setNewUser((prev) => ({ ...prev, username: e.target.value }))}
-            required
-          />
-          <input
-            className="input"
-            placeholder={t('users.namePlaceholder')}
-            value={newUser.display_name}
-            onChange={(e) => setNewUser((prev) => ({ ...prev, display_name: e.target.value }))}
-          />
-          <input
-            className="input"
-            type="password"
-            placeholder={t('users.passwordPlaceholder')}
-            value={newUser.password}
-            onChange={(e) => setNewUser((prev) => ({ ...prev, password: e.target.value }))}
-            required
-          />
-          <div className="flex gap-2">
-            <select
-              className="input"
-              value={newUser.role}
-              onChange={(e) => setNewUser((prev) => ({ ...prev, role: e.target.value }))}
-            >
-              <option value="admin">admin</option>
-              <option value="inspector">inspector</option>
-              <option value="staff">staff</option>
-            </select>
-            <button className="btn-primary whitespace-nowrap" type="submit" disabled={creating}>
-              {creating ? t('users.adding') : t('users.addBtn')}
-            </button>
-          </div>
-        </form>
-      </div>
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm" onClick={closeCreateModal}>
+          <form
+            onSubmit={handleCreateUser}
+            className="w-full max-w-3xl overflow-hidden rounded-3xl bg-white shadow-2xl dark:bg-gray-900"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-gray-200 bg-gradient-to-r from-indigo-50 to-cyan-50 px-5 py-4 dark:border-gray-800 dark:from-indigo-950/40 dark:to-cyan-950/30">
+              <div>
+                <h2 className="font-bold text-gray-900 dark:text-white">{t('users.addTitle')}</h2>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Форма открытия в модальном окне</p>
+              </div>
+              <button type="button" className="btn-secondary" onClick={closeCreateModal} disabled={creating}>
+                {t('users.cancelBtn')}
+              </button>
+            </div>
+            <div className="max-h-[calc(100vh-220px)] overflow-y-auto p-5">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <label className="md:col-span-1">
+                  <span className="label">{t('users.loginPlaceholder')}</span>
+                  <input
+                    className="input"
+                    placeholder={t('users.loginPlaceholder')}
+                    value={newUser.username}
+                    onChange={(e) => setNewUser((prev) => ({ ...prev, username: e.target.value }))}
+                    required
+                    autoComplete="off"
+                  />
+                </label>
+                <label className="md:col-span-1">
+                  <span className="label">{t('users.namePlaceholder')}</span>
+                  <input
+                    className="input"
+                    placeholder={t('users.namePlaceholder')}
+                    value={newUser.display_name}
+                    onChange={(e) => setNewUser((prev) => ({ ...prev, display_name: e.target.value }))}
+                    autoComplete="off"
+                  />
+                </label>
+                <label className="md:col-span-1">
+                  <span className="label">{t('users.passwordPlaceholder')}</span>
+                  <input
+                    className="input"
+                    type="password"
+                    placeholder={t('users.passwordPlaceholder')}
+                    value={newUser.password}
+                    onChange={(e) => setNewUser((prev) => ({ ...prev, password: e.target.value }))}
+                    required
+                    autoComplete="new-password"
+                  />
+                </label>
+                <label className="md:col-span-1">
+                  <span className="label">{t('users.roleCol')}</span>
+                  <select
+                    className="input"
+                    value={newUser.role}
+                    onChange={(e) => setNewUser((prev) => ({ ...prev, role: e.target.value }))}
+                  >
+                    <option value="admin">admin</option>
+                    <option value="inspector">inspector</option>
+                    <option value="staff">staff</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-gray-200 px-5 py-4 dark:border-gray-800">
+              <button type="button" className="btn-secondary" onClick={closeCreateModal} disabled={creating}>
+                {t('users.cancelBtn')}
+              </button>
+              <button className="btn-primary" type="submit" disabled={creating}>
+                {creating ? t('users.adding') : t('users.addBtn')}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       <div className="card overflow-hidden">
         {loading ? (

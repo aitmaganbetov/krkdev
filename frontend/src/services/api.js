@@ -76,6 +76,9 @@ export const getBasicInfoCatalog = () =>
 export const getPlatonusStatus = () =>
   api.get('/catalogs/platonus-status').then((r) => r.data)
 
+export const syncPlatonusCatalogs = () =>
+  api.post('/catalogs/platonus-sync').then((r) => r.data)
+
 export const getLdapSettings = () =>
   api.get('/settings/ldap').then((r) => r.data)
 

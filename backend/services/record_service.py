@@ -3,15 +3,10 @@ from sqlalchemy import text
 from sqlalchemy import case, func
 from models.record import Record
 from schemas.record import RecordCreate, RecordUpdate, DashboardStats
+from services import rating_template_service as rating_templates
 from fastapi import HTTPException, status
 from typing import Optional
 from datetime import datetime
-
-
-def _compute_score(ratings: dict) -> float:
-    if not ratings:
-        return 0.0
-    return round(sum(ratings.values()) / len(ratings), 2)
 
 
 def _compute_attendance(students_plan: int, students_fact: int) -> float:
@@ -74,7 +69,12 @@ def enrich_record_display_names(db: Session, records):
             usernames.append(record.reviewed_by)
 
     display_map = _get_user_display_map(db, usernames)
+    score_thresholds = rating_templates.get_score_thresholds(
+        db, {getattr(record, "academic_year", None) for record in record_list}
+    )
     for record in record_list:
+        threshold = score_thresholds.get(record.academic_year, rating_templates.LEGACY_PROBLEM_SCORE_BELOW)
+        setattr(record, "is_low_score", float(record.score or 0) < threshold)
         submitted_by = _normalize_login(getattr(record, "submitted_by", None))
         reviewed_by = _normalize_login(getattr(record, "reviewed_by", None))
         setattr(record, "submitted_by_display", display_map.get(submitted_by, getattr(record, "submitted_by", None)))
@@ -160,13 +160,16 @@ def get_record_by_id(db: Session, record_id: int) -> Record:
 
 
 def create_record(db: Session, data: RecordCreate, submitted_by: str) -> Record:
-    score = _compute_score(data.ratings)
+    template = rating_templates.require_template(db, data.academic_year)
+    rating_templates.validate_ratings(template, data.ratings, data.lesson_type)
+    score = rating_templates.compute_score(template, data.ratings, data.lesson_type)
     attendance = _compute_attendance(data.students_plan, data.students_fact)
 
     record = Record(
         **data.model_dump(),
         score=score,
         attendance=attendance,
+        is_problem=rating_templates.compute_is_problem(template, score, attendance),
         submitted_by=submitted_by,
     )
     db.add(record)
@@ -213,11 +216,17 @@ def update_record(
     for field, value in updates.items():
         setattr(record, field, value)
 
-    # Recompute derived fields if inputs changed
-    if "ratings" in updates:
-        record.score = _compute_score(record.ratings)
-    if "students_plan" in updates or "students_fact" in updates:
-        record.attendance = _compute_attendance(record.students_plan, record.students_fact)
+    # Recompute derived fields if inputs changed (по справочнику учебного года записи)
+    ratings_changed = bool({"ratings", "academic_year", "lesson_type"} & updates.keys())
+    attendance_changed = "students_plan" in updates or "students_fact" in updates
+    if ratings_changed or attendance_changed:
+        template = rating_templates.require_template(db, record.academic_year)
+        if ratings_changed:
+            rating_templates.validate_ratings(template, record.ratings, record.lesson_type)
+            record.score = rating_templates.compute_score(template, record.ratings, record.lesson_type)
+        if attendance_changed:
+            record.attendance = _compute_attendance(record.students_plan, record.students_fact)
+        record.is_problem = rating_templates.compute_is_problem(template, record.score, record.attendance)
 
     # Handle status transitions
     if status_change:
@@ -266,8 +275,11 @@ def get_dashboard_stats(
     db: Session,
     faculty: Optional[str] = None,
     op: Optional[str] = None,
+    academic_year: Optional[str] = None,
 ) -> DashboardStats:
     base = db.query(Record).filter(Record.status == "accepted")
+    if academic_year:
+        base = base.filter(Record.academic_year == academic_year)
     if faculty:
         base = base.filter(Record.faculty == faculty)
     if op:
@@ -276,7 +288,7 @@ def get_dashboard_stats(
     total = base.with_entities(func.count(Record.id)).scalar() or 0
     avg_score = base.with_entities(func.avg(Record.score)).scalar() or 0.0
     avg_attendance = base.with_entities(func.avg(Record.attendance)).scalar() or 0.0
-    problem_records = base.filter((Record.score < 5) | (Record.attendance < 40)).with_entities(func.count(Record.id)).scalar() or 0
+    problem_records = base.filter(Record.is_problem.is_(True)).with_entities(func.count(Record.id)).scalar() or 0
 
     return DashboardStats(
         total_records=total,
@@ -291,7 +303,7 @@ def get_dashboard_stats_for_user(db: Session, submitted_by: str) -> DashboardSta
     total = scoped.with_entities(func.count(Record.id)).scalar() or 0
     avg_score = scoped.with_entities(func.avg(Record.score)).scalar() or 0.0
     avg_attendance = scoped.with_entities(func.avg(Record.attendance)).scalar() or 0.0
-    problem_records = scoped.filter((Record.score < 5) | (Record.attendance < 40)).with_entities(func.count(Record.id)).scalar() or 0
+    problem_records = scoped.filter(Record.is_problem.is_(True)).with_entities(func.count(Record.id)).scalar() or 0
 
     return DashboardStats(
         total_records=total,
@@ -301,12 +313,15 @@ def get_dashboard_stats_for_user(db: Session, submitted_by: str) -> DashboardSta
     )
 
 
-def get_record_filter_options(db: Session) -> dict:
-    rows = db.query(Record.faculty, Record.op).filter(
+def get_record_filter_options(db: Session, academic_year: Optional[str] = None) -> dict:
+    query = db.query(Record.faculty, Record.op).filter(
         Record.status == "accepted",
         Record.faculty.isnot(None),
         Record.op.isnot(None),
-    ).all()
+    )
+    if academic_year:
+        query = query.filter(Record.academic_year == academic_year)
+    rows = query.all()
 
     by_faculty: dict[str, set[str]] = {}
     for faculty, op in rows:
@@ -337,6 +352,7 @@ def get_faculty_comparison(
     db: Session,
     faculty: Optional[str] = None,
     op: Optional[str] = None,
+    academic_year: Optional[str] = None,
 ) -> list[dict]:
     # Comparison level:
     # - no filters: by faculty
@@ -349,7 +365,7 @@ def get_faculty_comparison(
             func.count(Record.id).label("total_records"),
             func.avg(Record.score).label("avg_score"),
             func.avg(Record.attendance).label("avg_attendance"),
-            func.sum(case(((Record.score < 5) | (Record.attendance < 40), 1), else_=0)).label("problem_records"),
+            func.sum(case((Record.is_problem.is_(True), 1), else_=0)).label("problem_records"),
         ).filter(
             Record.status == "accepted",
             Record.group_name.isnot(None),
@@ -358,6 +374,8 @@ def get_faculty_comparison(
         )
         if faculty:
             query = query.filter(Record.faculty == faculty)
+        if academic_year:
+            query = query.filter(Record.academic_year == academic_year)
         rows = query.group_by(Record.group_name).all()
     elif faculty:
         label_column = Record.op.label("label")
@@ -366,13 +384,15 @@ def get_faculty_comparison(
             func.count(Record.id).label("total_records"),
             func.avg(Record.score).label("avg_score"),
             func.avg(Record.attendance).label("avg_attendance"),
-            func.sum(case(((Record.score < 5) | (Record.attendance < 40), 1), else_=0)).label("problem_records"),
+            func.sum(case((Record.is_problem.is_(True), 1), else_=0)).label("problem_records"),
         ).filter(
             Record.status == "accepted",
             Record.op.isnot(None),
             Record.op != "",
             Record.faculty == faculty,
         )
+        if academic_year:
+            query = query.filter(Record.academic_year == academic_year)
         rows = query.group_by(Record.op).all()
     else:
         label_column = Record.faculty.label("label")
@@ -381,12 +401,14 @@ def get_faculty_comparison(
             func.count(Record.id).label("total_records"),
             func.avg(Record.score).label("avg_score"),
             func.avg(Record.attendance).label("avg_attendance"),
-            func.sum(case(((Record.score < 5) | (Record.attendance < 40), 1), else_=0)).label("problem_records"),
+            func.sum(case((Record.is_problem.is_(True), 1), else_=0)).label("problem_records"),
         ).filter(
             Record.status == "accepted",
             Record.faculty.isnot(None),
             Record.faculty != "",
         )
+        if academic_year:
+            query = query.filter(Record.academic_year == academic_year)
         rows = query.group_by(Record.faculty).all()
 
     result = []

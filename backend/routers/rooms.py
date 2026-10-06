@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import hashlib
 import os
@@ -29,6 +30,20 @@ from services import ROLE_ADMIN, ROLE_INSPECTOR, require_roles
 from services.audit_log import audit_event
 
 router = APIRouter(prefix="/rooms", tags=["rooms"])
+
+# Каждая трансляция — отдельный ffmpeg с перекодированием; на 2 ядрах больше трёх сервер не тянет.
+CAMERA_LIVE_MAX_STREAMS = int(os.getenv("CAMERA_LIVE_MAX_STREAMS", "3") or 3)
+_live_streams: set[asyncio.subprocess.Process] = set()
+
+
+async def _stop_ffmpeg(process: asyncio.subprocess.Process) -> None:
+    if process.returncode is None:
+        process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=2)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
 
 
 class RoomIn(BaseModel):
@@ -366,7 +381,7 @@ def get_room_camera_snapshot(
 
 
 @router.get("/{room_id}/camera/live")
-def get_room_camera_live(
+async def get_room_camera_live(
     room_id: int,
     db: Session = Depends(get_db),
     _: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
@@ -377,43 +392,48 @@ def get_room_camera_live(
     if not room.camera_enabled or not room.camera_stream_url:
         raise HTTPException(status_code=400, detail="Камера для кабинета не настроена")
 
+    # Завершившиеся ffmpeg не считаем
+    _live_streams.difference_update({p for p in _live_streams if p.returncode is not None})
+    if len(_live_streams) >= CAMERA_LIVE_MAX_STREAMS:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Одновременно доступно не больше {CAMERA_LIVE_MAX_STREAMS} трансляций. Закройте другие и повторите.",
+        )
+
     stream_url = _authenticated_stream_url(room)
     try:
-        process = subprocess.Popen(
-            [
-                "ffmpeg",
-                "-loglevel", "error",
-                "-rtsp_transport", "tcp",
-                "-i", stream_url,
-                "-an",
-                "-vf", "fps=8,scale=1280:-2",
-                "-q:v", "5",
-                "-f", "mpjpeg",
-                "pipe:1",
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            bufsize=0,
+        process = await asyncio.create_subprocess_exec(
+            "ffmpeg",
+            "-loglevel", "error",
+            "-rtsp_transport", "tcp",
+            "-i", stream_url,
+            "-an",
+            "-vf", "fps=8,scale=1280:-2",
+            "-q:v", "5",
+            "-f", "mpjpeg",
+            "pipe:1",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
         )
     except OSError as exc:
         raise HTTPException(status_code=500, detail="Сервис трансляции недоступен") from exc
+    _live_streams.add(process)
 
-    def generate():
+    async def generate():
+        # Генератор асинхронный: когда браузер закрывает поток (переключение кабинета, уход
+        # со страницы), Starlette отменяет его, и ffmpeg останавливается сразу, а не висит.
         try:
             while True:
-                chunk = process.stdout.read(64 * 1024) if process.stdout else b""
+                chunk = await process.stdout.read(64 * 1024)
                 if not chunk:
                     break
                 yield chunk
         finally:
-            if process.stdout:
-                process.stdout.close()
-            process.terminate()
-            try:
-                process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
+            _live_streams.discard(process)
+            if process.returncode is None:
+                process.terminate()
+                # Ожидание вне отменённой задачи, чтобы гарантированно добить процесс
+                asyncio.get_running_loop().create_task(_stop_ffmpeg(process))
 
     return StreamingResponse(
         generate(),

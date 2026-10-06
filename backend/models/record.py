@@ -1,5 +1,5 @@
 from database import Base
-from sqlalchemy import Column, Integer, String, Float, Text, DateTime, JSON
+from sqlalchemy import Boolean, Column, Integer, String, Float, Text, DateTime, JSON
 from sqlalchemy.sql import func
 
 
@@ -26,6 +26,8 @@ class Record(Base):
     ratings = Column(JSON, nullable=False, default=dict)
 
     score = Column(Float, nullable=False, default=0.0)
+    # Считается при сохранении по порогам справочника учебного года
+    is_problem = Column(Boolean, nullable=False, default=False)
     # Status values: draft, submitted, rework, accepted
     status = Column(String(50), nullable=False, default="draft")
     comment = Column(Text, nullable=True)

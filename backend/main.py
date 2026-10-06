@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from migrations import import_faculties, migrate_records_submitted_by
 import os
 from database import engine, Base
-from routers import auth_router, catalogs_router, records_router, system_settings_router, users_router, audit_logs_router, rooms_router, violations_router, ai_router
+from routers import auth_router, catalogs_router, records_router, system_settings_router, users_router, audit_logs_router, rooms_router, violations_router, ai_router, rating_templates_router, academic_years_router
 from services import require_roles, ROLE_ADMIN
 from services.audit_log import audit_event
 
@@ -13,6 +13,8 @@ import models.audit_log  # noqa: F401
 import models.room  # noqa: F401
 import models.violation  # noqa: F401
 import models.violation_evidence  # noqa: F401
+import models.rating_template  # noqa: F401
+from services.rating_template_service import ensure_rating_setup
 
 
 def _read_csv_env(name: str, default: list[str]) -> list[str]:
@@ -43,8 +45,14 @@ except Exception as e:
     import logging
     logging.error(f"Failed to create database tables: {e}")
 
+try:
+    ensure_rating_setup(engine)
+except Exception as e:
+    import logging
+    logging.error(f"Failed to prepare rating templates: {e}")
+
 app = FastAPI(
-    title="KRK Monitoring System API",
+    title="Sapa API — система ректорского контроля",
     version="1.0.0",
     docs_url="/docs" if os.getenv("ENABLE_API_DOCS", "false").strip().lower() in {"1", "true", "yes"} else None,
     redoc_url="/redoc" if os.getenv("ENABLE_API_DOCS", "false").strip().lower() in {"1", "true", "yes"} else None,
@@ -67,6 +75,8 @@ app.include_router(audit_logs_router, prefix="/api")
 app.include_router(rooms_router, prefix="/api")
 app.include_router(violations_router, prefix="/api")
 app.include_router(ai_router, prefix="/api")
+app.include_router(rating_templates_router, prefix="/api")
+app.include_router(academic_years_router, prefix="/api")
 
 
 @app.get("/health")

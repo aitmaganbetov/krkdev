@@ -3,21 +3,11 @@ from typing import Optional
 from datetime import datetime as DateTime
 
 
-VALID_RATING_KEYS = {
-    *{f"1.{criterion}" for criterion in range(1, 8)},
-    *{f"2.{criterion}" for criterion in range(1, 7)},
-    *{f"3.{criterion}" for criterion in range(1, 5)},
-}
-
-
 def _validate_ratings(v: dict) -> dict:
-    if set(v.keys()) != VALID_RATING_KEYS:
-        raise ValueError("All rating categories from 1.1 to 3.4 must be filled")
-
-    for key, value in v.items():
-        if not isinstance(value, int) or not (1 <= value <= 10):
-            raise ValueError(f"Rating value for {key} must be an integer between 1 and 10")
-
+    # Состав вопросов и шкала зависят от учебного года и проверяются по справочнику
+    # в record_service; здесь только базовая форма.
+    if not v:
+        raise ValueError("Ratings are required")
     return v
 
 
@@ -121,6 +111,8 @@ class RecordOut(RecordBase):
     id: int
     attendance: float
     score: float
+    is_problem: bool = False
+    is_low_score: bool = False
     submitted_by: Optional[str] = None
     submitted_by_display: Optional[str] = None
     submitted_at: Optional[DateTime] = None

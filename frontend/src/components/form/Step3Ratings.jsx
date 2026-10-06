@@ -1,102 +1,160 @@
+import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
+import {
+  CALC_METHOD_LABELS,
+  applicableSections,
+  computeScore,
+  hasLessonTypeModules,
+  isValidRating,
+  localized,
+  scoreTone,
+  templateMaxScore,
+} from '../../utils/ratingTemplate'
+import { lessonTypeLabel, templateLang } from '../../locales/recordForm'
+import { Alert, Card, CardHeader, Field, LoadingBlock, Select, cn } from '../ui'
 
-// Step 3: Ratings matrix (values 1-10)
-const SECTIONS = [
-  {
-    id: 1,
-    titleKey: 'ratings.section1',
-    criteria: [
-      { key: '1.1' }, { key: '1.2' }, { key: '1.3' }, { key: '1.4' },
-      { key: '1.5' }, { key: '1.6' }, { key: '1.7' },
-    ],
-  },
-  {
-    id: 2,
-    titleKey: 'ratings.section2',
-    criteria: [
-      { key: '2.1' }, { key: '2.2' }, { key: '2.3' },
-      { key: '2.4' }, { key: '2.5' }, { key: '2.6' },
-    ],
-  },
-  {
-    id: 3,
-    titleKey: 'ratings.section3',
-    criteria: [
-      { key: '3.1' }, { key: '3.2' }, { key: '3.3' }, { key: '3.4' },
-    ],
-  },
-]
+// Цвет оценки относительно шкалы (пороги — scoreTone)
+const TONE_TEXT = {
+  good: 'text-success',
+  mid: 'text-warning',
+  bad: 'text-danger',
+  none: 'text-fg-subtle',
+}
 
-function ScoreInput({ value, onChange }) {
+function ScoreInput({ value, onChange, scaleMin, scaleMax, labelledBy, error }) {
   const { t } = useTranslation()
+  const options = []
+  for (let score = scaleMax; score >= scaleMin; score -= 1) options.push({ value: score, label: String(score) })
   return (
-    <div className="flex items-center gap-2">
-      <select
-        value={value ?? ''}
-        onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
-        className="input"
-      >
-        <option value="">{t('steps.selectDefault')}</option>
-        {Array.from({ length: 10 }, (_, index) => 10 - index).map((score) => (
-          <option key={score} value={score}>{score}</option>
-        ))}
-      </select>
-      <span className={`w-12 text-center text-sm font-bold ${
-        value >= 8 ? 'text-green-600 dark:text-green-400'
-        : value >= 6 ? 'text-yellow-600 dark:text-yellow-400'
-        : value >= 1 ? 'text-red-600 dark:text-red-400'
-        : 'text-gray-400 dark:text-gray-500'
-      }`}>
-        {value ?? '—'}
-      </span>
-    </div>
+    <Field error={error} className="w-full sm:w-52">
+      <div className="flex min-w-0 items-center gap-3">
+        <Select
+          value={value ?? ''}
+          onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
+          placeholder={t('steps.selectDefault')}
+          options={options}
+          aria-labelledby={labelledBy}
+          className="tabular"
+        />
+        <span aria-hidden="true" className={cn('w-8 shrink-0 text-center text-base font-semibold tabular', TONE_TEXT[scoreTone(value, scaleMax)])}>
+          {value ?? '—'}
+        </span>
+      </div>
+    </Field>
   )
 }
 
-export default function Step3Ratings({ ratings, onChange }) {
+// Строка критерия: полный текст переносится, контроль оценки справа (на мобильном — под текстом)
+function QuestionRow({ question, lang, value, onChange, template, showErrors }) {
   const { t } = useTranslation()
-  const filledRatings = Object.values(ratings).filter((value) => Number.isInteger(value))
-  const avg = filledRatings.length
-    ? (filledRatings.reduce((a, b) => a + b, 0) / filledRatings.length).toFixed(2)
-    : '—'
+  const uid = useId()
+  const text = localized(question.text, lang)
+  const hint = localized(question.hint, lang)
+  const missing = showErrors && !isValidRating(template, value)
+  return (
+    <li className="flex min-w-0 flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-start sm:gap-6">
+      <div className="flex min-w-0 flex-1 gap-3">
+        <span className="mt-0.5 w-9 shrink-0 text-xs font-medium tabular text-fg-subtle">{question.code}</span>
+        <div className="min-w-0 flex-1">
+          <p id={`${uid}-label`} className="text-sm font-medium text-fg">
+            <span className="sr-only">{t('recordForm.ratings.scoreFor', { code: question.code })}: </span>
+            {text}
+          </p>
+          {hint && (
+            <p className="mt-1 whitespace-pre-line text-xs text-fg-muted">
+              <span className="font-medium text-fg-subtle">{t('recordForm.ratings.signs')}: </span>
+              {hint}
+            </p>
+          )}
+        </div>
+      </div>
+      <div className="min-w-0 pl-12 sm:shrink-0 sm:pl-0">
+        <ScoreInput
+          value={value}
+          scaleMin={template.scale_min}
+          scaleMax={template.scale_max}
+          labelledBy={`${uid}-label`}
+          error={missing ? t('recordForm.ratings.notRated') : undefined}
+          onChange={onChange}
+        />
+      </div>
+    </li>
+  )
+}
+
+// Шаг 3: вопросы и шкала из справочника учебного года
+export default function Step3Ratings({ ratings, onChange, template, academicYear, lessonType, templatesLoading, showErrors = false }) {
+  const { t, i18n } = useTranslation()
+  const lang = templateLang(i18n.language)
+
+  if (templatesLoading) {
+    return <LoadingBlock label={t('ui.loading')} />
+  }
+
+  if (!template) {
+    return <Alert tone="warning">{t('recordForm.ratings.noTemplate', { year: academicYear || '—' })}</Alert>
+  }
+
+  const sections = applicableSections(template, lessonType)
+  const missingModule = hasLessonTypeModules(template)
+    && !sections.some((section) => (section.lesson_types || []).length > 0)
+  const score = computeScore(template, ratings, lessonType)
+  const maxScore = templateMaxScore(template)
+  const note = localized(template.note, lang)
+  const method = t(`recordForm.calcMethods.${template.calc_method}`, {
+    defaultValue: (CALC_METHOD_LABELS[template.calc_method] || template.calc_method || '').toLowerCase(),
+  })
+  const codes = sections.flatMap((section) => (section.questions || []).map((question) => question.code))
+  const rated = codes.filter((code) => isValidRating(template, ratings[code])).length
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">{t('steps.ratingsTitle')}</h2>
-        <div className="text-sm">
-          {t('steps.avgScore')}{' '}
-          <span className={`font-bold text-base ${
-            avg >= 8 ? 'text-green-600 dark:text-green-400'
-            : avg >= 6 ? 'text-yellow-600 dark:text-yellow-400'
-            : 'text-red-600 dark:text-red-400'
-          }`}>
-            {avg}
-          </span>
+    <div className="flex min-w-0 flex-col gap-6">
+      <div className="flex min-w-0 flex-wrap items-end justify-between gap-4">
+        <h2 className="min-w-0 text-lg font-semibold text-fg">{t('steps.ratingsTitle')}</h2>
+        {/* Итог по ходу заполнения */}
+        <div className="flex min-w-0 flex-col gap-0.5 rounded-lg border border-line bg-surface-muted px-4 py-2.5" aria-live="polite">
+          <p className="text-xs font-medium text-fg-muted">{t('recordForm.ratings.avgScore')}</p>
+          <p className="text-2xl font-semibold tabular">
+            <span className={TONE_TEXT[scoreTone(score, maxScore)]}>{score ?? '—'}</span>
+            <span className="text-base font-medium text-fg-subtle"> / {maxScore}</span>
+          </p>
+          <p className="text-xs text-fg-subtle tabular">{t('recordForm.ratings.progress', { done: rated, total: codes.length })}</p>
         </div>
       </div>
 
-      <div className="card p-3 text-xs text-gray-600 dark:text-gray-400 space-y-1">
-        <p>{t('steps.scaleNote')}</p>
-        <p>{t('steps.levelsNote')}</p>
-      </div>
+      <Alert tone="info">
+        <p>
+          {t('recordForm.ratings.templateInfo', {
+            year: template.academic_year,
+            min: template.scale_min,
+            max: template.scale_max,
+            method,
+          })}
+        </p>
+        {note && note.split('\n').map((line, index) => <p key={index}>{line}</p>)}
+      </Alert>
 
-      {SECTIONS.map((section) => (
-        <div key={section.id} className="card p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t(section.titleKey)}</h3>
-          {section.criteria.map(({ key }) => (
-            <div key={key} className="grid grid-cols-[1fr_2fr] items-center gap-4">
-              <span className="text-sm text-gray-600 dark:text-gray-400">
-                <span className="font-mono text-xs text-gray-400 dark:text-gray-500 mr-1">{key}</span>
-                {t(`ratings.${key}`)}
-              </span>
-              <ScoreInput
-                value={ratings[key] ?? null}
-                onChange={(v) => onChange({ ...ratings, [key]: v })}
+      {missingModule && (
+        <Alert tone="warning">{t('recordForm.ratings.missingModule', { type: lessonTypeLabel(t, lessonType) || '—' })}</Alert>
+      )}
+
+      {sections.map((section, sectionIndex) => (
+        <Card key={`${section.code}-${sectionIndex}`}>
+          <CardHeader title={localized(section.title, lang)} titleAs="h3" />
+          <ul className="flex min-w-0 flex-col divide-y divide-line p-4 sm:p-5">
+            {(section.questions || []).map((question) => (
+              <QuestionRow
+                key={question.code}
+                question={question}
+                lang={lang}
+                template={template}
+                showErrors={showErrors}
+                value={ratings[question.code] ?? null}
+                onChange={(v) => onChange({ ...ratings, [question.code]: v })}
               />
-            </div>
-          ))}
-        </div>
+            ))}
+          </ul>
+        </Card>
       ))}
     </div>
   )

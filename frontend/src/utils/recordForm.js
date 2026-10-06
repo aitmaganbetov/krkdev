@@ -1,34 +1,10 @@
-export const ALL_RATING_KEYS = [
-  ...Array.from({ length: 7 }, (_, i) => `1.${i + 1}`),
-  ...Array.from({ length: 6 }, (_, i) => `2.${i + 1}`),
-  ...Array.from({ length: 4 }, (_, i) => `3.${i + 1}`),
-]
-
-export function createEmptyRatings() {
-  return Object.fromEntries(ALL_RATING_KEYS.map((key) => [key, null]))
-}
-
-export function normalizeRatingsForForm(ratings = {}) {
-  return Object.fromEntries(
-    ALL_RATING_KEYS.map((key) => {
-      const value = ratings[key]
-      return [key, Number.isInteger(value) ? value : null]
-    })
-  )
-}
-
-export function hasCompleteRatings(ratings = {}) {
-  return ALL_RATING_KEYS.every((key) => {
-    const value = ratings[key]
-    return Number.isInteger(value) && value >= 1 && value <= 10
-  })
-}
+import { hasCompleteRatings } from './ratingTemplate'
 
 function hasText(value) {
   return typeof value === 'string' && value.trim().length > 0
 }
 
-export function getRecordFormStepError(step, data) {
+export function getRecordFormStepError(step, data, template) {
   if (step === 0) {
     const fields = ['teacher', 'subject', 'faculty', 'op', 'group_name', 'room']
     return fields.every((field) => hasText(data[field]))
@@ -58,7 +34,10 @@ export function getRecordFormStepError(step, data) {
   }
 
   if (step === 2) {
-    return hasCompleteRatings(data.ratings)
+    if (!template) {
+      return `Для учебного года ${data.academic_year || ''} не настроен справочник вопросов.`
+    }
+    return hasCompleteRatings(template, data.ratings, data.lesson_type)
       ? ''
       : 'Заполните все рейтинговые категории перед переходом дальше.'
   }
@@ -72,9 +51,9 @@ export function getRecordFormStepError(step, data) {
   return ''
 }
 
-export function getRecordFormError(data) {
+export function getRecordFormError(data, template) {
   for (let step = 0; step <= 3; step += 1) {
-    const error = getRecordFormStepError(step, data)
+    const error = getRecordFormStepError(step, data, template)
     if (error) {
       return error
     }

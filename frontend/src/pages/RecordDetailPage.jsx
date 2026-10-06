@@ -1,33 +1,42 @@
 import { useEffect, useState } from 'react'
-import { useParams, useNavigate, useLocation } from 'react-router-dom'
+import { Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { 
-  getRecord, deleteRecord, submitRecord, sendRecordToRework, acceptRecord 
+import {
+  getRecord, deleteRecord, submitRecord, sendRecordToRework, acceptRecord
 } from '../services/api'
 import { useAuth } from '../context/AuthContext'
-import Spinner from '../components/Spinner'
 import StatusBadge from '../components/StatusBadge'
+import {
+  Alert, Button, Card, CardBody, CardHeader, DescriptionList, EmptyState, LoadingBlock, PageHeader, PageStack,
+  StatCard, cn, useUI,
+} from '../components/ui'
 import { isSameIdentity } from '../utils/identity'
 import { formatDateTimeUtcPlus5 } from '../utils/datetime'
+import { applicableSections, findTemplate, localized, scoreTone, templateMaxScore, useRatingTemplates } from '../utils/ratingTemplate'
+import { formatLabel, lessonTypeLabel, templateLang } from '../locales/recordForm'
 
-const RATING_KEYS = [
-  '1.1','1.2','1.3','1.4','1.5','1.6','1.7',
-  '2.1','2.2','2.3','2.4','2.5','2.6',
-  '3.1','3.2','3.3','3.4',
-]
+// Цвет полосы и значения оценки относительно шкалы (пороги — scoreTone)
+const BAR_COLOR = { good: 'bg-success-solid', mid: 'bg-warning-solid', bad: 'bg-danger-solid', none: 'bg-line-strong' }
+const VALUE_COLOR = { good: 'text-success', mid: 'text-warning', bad: 'text-danger', none: 'text-fg-subtle' }
 
-function RatingBar({ ratingKey, label, value }) {
-  const pct = (value / 10) * 100
-  const color = value >= 8 ? 'bg-green-500' : value >= 6 ? 'bg-yellow-500' : 'bg-red-500'
+// Критерий оценки: полный текст переносится (не обрезается), справа — полоса и балл;
+// на узком экране полоса уходит под текст.
+function RatingRow({ ratingKey, label, value, scaleMax = 10 }) {
+  const pct = Math.max(0, Math.min(100, (value / scaleMax) * 100))
+  const tone = scoreTone(value, scaleMax)
   return (
-    <div className="flex items-center gap-3 text-sm print:items-start">
-      <span className="w-6 text-xs font-mono text-gray-400 print:flex-shrink-0">{ratingKey}</span>
-      <span className="flex-1 text-gray-600 dark:text-gray-400 truncate print:truncate-none print:whitespace-normal print:break-words">{label}</span>
-      <div className="w-28 bg-gray-200 dark:bg-gray-700 rounded-full h-2 print:w-24 print:flex-shrink-0 print:mt-1">
-        <div className={`h-2 rounded-full ${color}`} style={{ width: `${pct}%` }} />
+    <li className="flex min-w-0 flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-start sm:gap-6 print:break-inside-avoid">
+      <div className="flex min-w-0 flex-1 gap-3">
+        <span className="mt-0.5 w-9 shrink-0 text-xs font-medium tabular text-fg-subtle">{ratingKey}</span>
+        <p className="min-w-0 flex-1 text-sm text-fg">{label}</p>
       </div>
-      <span className="w-5 text-right font-semibold text-gray-800 dark:text-gray-200 print:flex-shrink-0">{value}</span>
-    </div>
+      <div className="flex min-w-0 items-center gap-3 pl-12 sm:w-44 sm:shrink-0 sm:pl-0 sm:pt-0.5">
+        <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-hover" aria-hidden="true">
+          <div className={cn('h-full rounded-full', BAR_COLOR[tone])} style={{ width: `${pct}%` }} />
+        </div>
+        <span className={cn('w-8 shrink-0 text-right text-sm font-semibold tabular', VALUE_COLOR[tone])}>{value}</span>
+      </div>
+    </li>
   )
 }
 
@@ -35,11 +44,15 @@ export default function RecordDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const location = useLocation()
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const { toast, confirm } = useUI()
+  const { templates } = useRatingTemplates()
   const [record, setRecord] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError]   = useState('')
   const [actionsLoading, setActionsLoading] = useState(false)
+  // Какое действие выполняется — для индикатора на нужной кнопке
+  const [pendingAction, setPendingAction] = useState('')
   const { role, currentUser } = useAuth()
   const isOwner = isSameIdentity(record?.submitted_by, currentUser)
 
@@ -57,54 +70,65 @@ export default function RecordDetailPage() {
       .finally(() => setLoading(false))
   }, [id])
 
+  const startAction = (name) => { setActionsLoading(true); setPendingAction(name) }
+  const stopAction = () => { setActionsLoading(false); setPendingAction('') }
+
   const handleDelete = async () => {
-    if (!window.confirm(t('record.deleteConfirm'))) return
-    setActionsLoading(true)
+    const ok = await confirm({ message: t('record.deleteConfirm'), confirmLabel: t('record.deleteBtn'), tone: 'danger' })
+    if (!ok) return
+    startAction('delete')
     try {
       await deleteRecord(id)
+      toast.success(t('recordForm.detail.deleted'))
       navigate('/records')
     } catch (err) {
-      setError(err.response?.data?.detail ?? 'Ошибка при удалении')
-      setActionsLoading(false)
+      setError(err.response?.data?.detail ?? t('recordForm.detail.deleteError'))
+      stopAction()
     }
   }
 
   const handleSubmit = async () => {
-    if (!window.confirm(t('record.submitConfirm'))) return
-    setActionsLoading(true)
+    const ok = await confirm({ message: t('record.submitConfirm'), confirmLabel: t('record.submit') })
+    if (!ok) return
+    startAction('submit')
     try {
       const updated = await submitRecord(id)
       setRecord(updated)
-      setActionsLoading(false)
+      stopAction()
+      toast.success(t('recordForm.detail.submitted'))
     } catch (err) {
-      setError(err.response?.data?.detail ?? 'Ошибка при отправке')
-      setActionsLoading(false)
+      setError(err.response?.data?.detail ?? t('recordForm.detail.submitError'))
+      stopAction()
     }
   }
 
   const handleSendToRework = async () => {
-    if (!window.confirm(t('record.reworkConfirm'))) return
-    setActionsLoading(true)
+    const ok = await confirm({ message: t('record.reworkConfirm'), confirmLabel: t('record.toRework') })
+    if (!ok) return
+    startAction('rework')
     try {
       const updated = await sendRecordToRework(id)
       setRecord(updated)
-      setActionsLoading(false)
+      stopAction()
+      toast.success(t('recordForm.detail.reworked'))
     } catch (err) {
-      setError(err.response?.data?.detail ?? 'Ошибка при отправке на доработку')
-      setActionsLoading(false)
+      setError(err.response?.data?.detail ?? t('recordForm.detail.reworkError'))
+      stopAction()
     }
   }
 
   const handleAccept = async () => {
-    if (!window.confirm(t('record.acceptConfirm'))) return
-    setActionsLoading(true)
+    const ok = await confirm({ message: t('record.acceptConfirm'), confirmLabel: t('record.accept') })
+    if (!ok) return
+    startAction('accept')
     try {
       const updated = await acceptRecord(id)
       setRecord(updated)
-      setActionsLoading(false)
+      stopAction()
+      toast.success(t('recordForm.detail.accepted'))
     } catch (err) {
-      setError(err.response?.data?.detail ?? 'Ошибка при принятии')
-      setActionsLoading(false)
+      setError(err.response?.data?.detail ?? t('recordForm.detail.acceptError'))
+      stopAction()
     }
   }
 
@@ -112,171 +136,199 @@ export default function RecordDetailPage() {
     window.print()
   }
 
-  if (loading) return <div className="flex justify-center py-20"><Spinner size="lg" /></div>
-  if (!record) return <p className="text-red-500 text-center mt-20">{error || t('record.notFound')}</p>
+  // «Назад» возвращает на предыдущую страницу; если запись открыта по прямой ссылке — к списку
+  const handleBack = (event) => {
+    if (window.history.state?.idx > 0) {
+      event.preventDefault()
+      navigate(-1)
+    }
+  }
+
+  // Ответ сервера может прийти не строкой (ошибки валидации) — тогда общий текст
+  const errorText = typeof error === 'string' ? error : t('common.error')
+
+  if (loading) return <LoadingBlock label={t('ui.loading')} />
+  if (!record) {
+    return (
+      <Card>
+        <EmptyState
+          icon="file-text"
+          title={errorText || t('record.notFound')}
+          action={<Button as={Link} to="/records" variant="secondary" icon="arrow-left">{t('recordForm.backToList')}</Button>}
+        />
+      </Card>
+    )
+  }
 
   const { ratings = {} } = record
+  const lang = templateLang(i18n.language)
+  const template = findTemplate(templates, record.academic_year)
+  const maxScore = templateMaxScore(template)
+  const scoreShare = maxScore ? record.score / maxScore : 0
+  const totalTone = scoreShare >= 0.7 ? 'success' : scoreShare >= 0.5 ? 'warning' : 'danger'
+  // Записи без справочника (не должно быть) показываем по ключам как есть
+  const ratingSections = template
+    ? applicableSections(template, record.lesson_type)
+    : [{ code: '', title: '', questions: Object.keys(ratings).sort().map((code) => ({ code, text: t(`ratings.${code}`) })) }]
+  const hasRatings = ratingSections.some((section) => (section.questions || []).length > 0)
+
+  const infoGroups = [
+    {
+      title: t('recordForm.sections.lesson'),
+      items: [
+        { label: t('record.date'), value: formatDateTimeUtcPlus5(record.datetime) },
+        { label: t('recordForm.fields.lessonType'), value: record.lesson_type ? lessonTypeLabel(t, record.lesson_type) : '—' },
+        { label: t('record.format'), value: record.format ? formatLabel(t, record.format) : '—' },
+        { label: t('record.academicYear'), value: record.academic_year || '—' },
+        record.topic && { label: t('record.topic'), value: record.topic, full: true },
+      ],
+    },
+    {
+      title: t('recordForm.sections.groupRoom'),
+      items: [
+        { label: t('record.faculty'), value: record.faculty || '—' },
+        { label: t('record.op'), value: record.op || '—' },
+        { label: t('record.group'), value: record.group_name || '—' },
+        { label: t('record.room'), value: record.room || '—' },
+      ],
+    },
+    {
+      title: t('recordForm.sections.review'),
+      items: [
+        { label: t('record.submittedBy'), value: record.submitted_by_display || record.submitted_by || '—' },
+        { label: t('record.reviewedBy'), value: record.reviewed_by_display || record.reviewed_by || '—' },
+      ],
+    },
+  ]
 
   return (
-    <div className="space-y-5 print:max-w-none print:space-y-4">
+    <PageStack className="print:gap-4">
       {location.state?.notice && (
-        <div className="rounded-xl border border-green-200 bg-green-50 text-green-800 px-4 py-3 text-sm dark:bg-green-900/20 dark:border-green-800 dark:text-green-300 print:hidden">
-          {location.state.notice}
-        </div>
+        <Alert tone="success" className="print:hidden">{location.state.notice}</Alert>
       )}
 
       {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 text-red-800 px-4 py-3 text-sm dark:bg-red-900/20 dark:border-red-800 dark:text-red-300 print:hidden">
-          {error}
-          <button 
-            className="ml-2 font-semibold hover:underline"
-            onClick={() => setError('')}
-          >
-            ✕
-          </button>
-        </div>
+        <Alert tone="danger" onClose={() => setError('')} closeLabel={t('ui.close')} className="print:hidden">
+          {errorText}
+        </Alert>
       )}
 
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 print:block">
-        <div>
-          <button
-            className="text-sm text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 mb-2 print:hidden"
-            onClick={() => navigate(-1)}
-          >
-            {t('record.back')}
-          </button>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{record.subject}</h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">{record.teacher}</p>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end print:hidden">
-          <StatusBadge status={record.status} />
-          <div className="flex gap-2 flex-wrap justify-end">
-            <button
-              className="btn-secondary text-sm"
-              onClick={handlePrint}
-              type="button"
-            >
-              {t('record.print')}
-            </button>
+      <PageHeader
+        title={record.subject}
+        back={{ to: '/records', label: t('recordForm.back'), onClick: handleBack }}
+        className="print:[&_a]:hidden"
+        actions={
+          <div className="flex min-w-0 flex-wrap items-center gap-2 print:hidden">
+            <Button variant="secondary" icon="printer" onClick={handlePrint}>{t('record.print')}</Button>
             {canEdit && (
-              <button
-                className="btn-secondary text-sm"
-                onClick={() => navigate(`/records/${id}/edit`)}
-              >
-                {t('record.edit')}
-              </button>
+              <Button as={Link} to={`/records/${id}/edit`} variant="secondary" icon="edit">{t('record.edit')}</Button>
             )}
             {canSubmit && (
-              <button 
-                className="btn-primary text-sm" 
-                onClick={handleSubmit}
-                disabled={actionsLoading}
-              >
-                {actionsLoading ? '...' : t('record.submit')}
-              </button>
+              <Button icon="send" onClick={handleSubmit} disabled={actionsLoading} loading={pendingAction === 'submit'}>
+                {t('record.submit')}
+              </Button>
             )}
             {canSendToRework && (
-              <button 
-                className="btn-warning text-sm" 
-                onClick={handleSendToRework}
-                disabled={actionsLoading}
-              >
-                {actionsLoading ? '...' : t('record.toRework')}
-              </button>
+              <Button variant="secondary" icon="rotate-ccw" onClick={handleSendToRework} disabled={actionsLoading}
+                loading={pendingAction === 'rework'}>
+                {t('record.toRework')}
+              </Button>
             )}
             {canAccept && (
-              <button 
-                className="btn-success text-sm" 
-                onClick={handleAccept}
-                disabled={actionsLoading}
-              >
-                {actionsLoading ? '...' : t('record.accept')}
-              </button>
+              <Button variant="success" icon="check" onClick={handleAccept} disabled={actionsLoading}
+                loading={pendingAction === 'accept'}>
+                {t('record.accept')}
+              </Button>
             )}
             {canDelete && (
-              <button 
-                className="btn-danger text-sm" 
-                onClick={handleDelete}
-                disabled={actionsLoading}
-              >
-                {actionsLoading ? '...' : t('record.deleteBtn')}
-              </button>
+              <Button variant="danger-ghost" icon="trash" onClick={handleDelete} disabled={actionsLoading}
+                loading={pendingAction === 'delete'}>
+                {t('record.deleteBtn')}
+              </Button>
             )}
           </div>
+        }
+      >
+        <p className="mt-1 text-base text-fg-muted">{record.teacher}</p>
+        <div className="mt-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+          <StatusBadge status={record.status} />
+          <span className="text-sm text-fg-subtle tabular">{t('recordForm.detail.recordNo', { id })}</span>
         </div>
-      </div>
+      </PageHeader>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 print:grid-cols-1 print:gap-3">        {/* Scores */}
-        <div className="lg:col-span-1 space-y-4 print:grid print:grid-cols-2 print:gap-3 print:space-y-0">
-          <div className="card p-4 text-center">
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{t('record.totalScore')}</p>
-            <p className={`text-5xl font-bold ${
-              record.score >= 7 ? 'text-green-600 dark:text-green-400'
-              : record.score >= 5 ? 'text-yellow-500 dark:text-yellow-400'
-              : 'text-red-600 dark:text-red-400'
-            }`}>{record.score.toFixed(1)}</p>
-            <p className="text-xs text-gray-400 mt-1">{t('record.outOf10')}</p>
-          </div>
-          <div className="card p-4 text-center">
-            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{t('record.attendance')}</p>
-            <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">
-              {record.attendance.toFixed(0)}%
-            </p>
-            <p className="text-xs text-gray-400 mt-1">
-              {record.students_fact} / {record.students_plan} {t('record.students')}
-            </p>
-          </div>
-        </div>
-
-        {/* Details */}
-        <div className="lg:col-span-2 space-y-4">
-          <div className="card p-4">
-            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">{t('record.info')}</h2>
-            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm print:grid-cols-1">
-              {[
-                [t('record.faculty'), record.faculty],
-                [t('record.op'), record.op],
-                [t('record.group'), record.group_name],
-                [t('record.room'), record.room],
-                [t('record.type'), record.lesson_type],
-                [t('record.format'), record.format],
-                [t('record.submittedBy'), record.submitted_by_display || record.submitted_by || '—'],
-                [t('record.reviewedBy'), record.reviewed_by_display || record.reviewed_by || '—'],
-                [t('record.academicYear'), record.academic_year],
-                [t('record.date'), formatDateTimeUtcPlus5(record.datetime)],
-              ].map(([k, v]) => (
-                <div key={k} className="flex gap-2 print:block">
-                  <dt className="text-gray-400 w-28 flex-shrink-0 print:w-auto print:mb-1">{k}:</dt>
-                  <dd className="text-gray-800 dark:text-gray-200 font-medium break-words whitespace-normal">{v}</dd>
-                </div>
-              ))}
-            </dl>
-            {record.topic && (
-              <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-800 text-sm">
-                <span className="text-gray-400">{t('record.topic')}: </span>
-                <span className="text-gray-800 dark:text-gray-200 break-words whitespace-normal">{record.topic}</span>
-              </div>
+      <div className="grid min-w-0 gap-6 lg:grid-cols-3 print:block">
+        {/* Итоги: общий балл и посещаемость */}
+        <aside className="grid min-w-0 grid-cols-2 gap-4 self-start lg:col-start-3 lg:row-start-1 lg:grid-cols-1 print:mb-4">
+          <StatCard
+            label={t('record.totalScore')}
+            tone={totalTone}
+            value={(
+              <>
+                {typeof record.score === 'number' ? record.score.toFixed(1) : '—'}
+                <span className="text-base font-medium text-fg-subtle"> / {maxScore}</span>
+              </>
             )}
-            {record.comment && (
-              <div className="mt-2 text-sm">
-                <span className="text-gray-400">{t('record.comment')}: </span>
-                <span className="text-gray-600 dark:text-gray-400 italic break-words whitespace-normal">{record.comment}</span>
-              </div>
-            )}
-          </div>
+          />
+          <StatCard
+            label={t('record.attendance')}
+            tone="primary"
+            value={typeof record.attendance === 'number' ? `${record.attendance.toFixed(0)}%` : '—'}
+            hint={t('recordForm.detail.studentsHint', { fact: record.students_fact, plan: record.students_plan })}
+          />
+        </aside>
 
-          {/* Ratings breakdown */}
-          <div className="card p-4">
-            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">{t('record.ratings')}</h2>
-            <div className="space-y-2">
-              {RATING_KEYS.map((key) => (
-                <RatingBar key={key} ratingKey={key} label={t(`ratings.${key}`)} value={ratings[key] ?? 0} />
+        <div className="flex min-w-0 flex-col gap-6 lg:col-span-2 lg:col-start-1 lg:row-start-1 print:gap-4">
+          {/* Сведения о занятии */}
+          <Card>
+            <CardHeader title={t('record.info')} />
+            <div className="flex min-w-0 flex-col divide-y divide-line">
+              {infoGroups.map((group) => (
+                <section key={group.title} className="min-w-0 p-4 sm:p-5 print:break-inside-avoid">
+                  <h3 className="mb-3 text-sm font-semibold text-fg">{group.title}</h3>
+                  <DescriptionList items={group.items} />
+                </section>
               ))}
             </div>
-          </div>
+          </Card>
+
+          {record.comment && (
+            <Card className="print:break-inside-avoid">
+              <CardHeader title={t('record.comment')} />
+              <CardBody>
+                <p className="whitespace-pre-line text-sm text-fg">{record.comment}</p>
+              </CardBody>
+            </Card>
+          )}
+
+          {/* Оценки по критериям, сгруппированные по разделам справочника */}
+          <Card>
+            <CardHeader title={t('record.ratings')} />
+            <CardBody className="flex flex-col gap-6">
+              {!hasRatings && <EmptyState icon="star" title={t('recordForm.detail.noRatings')} compact />}
+              {ratingSections.map((section, sectionIndex) => (
+                (section.questions || []).length > 0 && (
+                  <section key={`${section.code}-${sectionIndex}`} className="min-w-0">
+                    {section.title && (
+                      <h3 className="mb-3 text-sm font-semibold text-fg">{localized(section.title, lang)}</h3>
+                    )}
+                    <ul className="flex min-w-0 flex-col divide-y divide-line">
+                      {section.questions.map((question) => (
+                        <RatingRow
+                          key={question.code}
+                          ratingKey={question.code}
+                          label={localized(question.text, lang)}
+                          value={ratings[question.code] ?? 0}
+                          scaleMax={template?.scale_max ?? 10}
+                        />
+                      ))}
+                    </ul>
+                  </section>
+                )
+              ))}
+            </CardBody>
+          </Card>
         </div>
       </div>
-    </div>
+    </PageStack>
   )
 }

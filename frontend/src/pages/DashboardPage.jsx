@@ -1,79 +1,65 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { getDashboardFacultyComparison, getDashboardStats, getRecordFilterOptions } from '../services/api'
+import { getAcademicYears, getDashboardFacultyComparison, getDashboardStats, getRecordFilterOptions } from '../services/api'
+import { intlLocale } from '../utils/locale'
+import {
+  Alert, Badge, Button, Card, CardBody, CardHeader, DataTable, EmptyState, Field, FilterBar, Icon,
+  PageHeader, PageStack, Select, Skeleton, Spinner, StatCard, cn,
+} from '../components/ui'
 
-function Icon({ name, className = 'h-5 w-5' }) {
-  const paths = {
-    document: 'M9 12h6m-6 4h6M10 2h4l5 5v13a2 2 0 01-2 2H7a2 2 0 01-2-2V4a2 2 0 012-2h3zm4 0v5h5',
-    quality: 'M12 3l2.2 4.46 4.92.72-3.56 3.46.84 4.89L12 14.22l-4.4 2.31.84-4.89L4.88 8.18l4.92-.72L12 3z',
-    attendance: 'M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2m7-10a4 4 0 100-8 4 4 0 000 8zm8 0l2 2 4-4',
-    alert: 'M12 9v4m0 4h.01M10.3 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.7 3.86a2 2 0 00-3.4 0z',
-    filter: 'M4 5h16M7 12h10m-7 7h4',
-    building: 'M3 21h18M5 21V5l7-3 7 3v16M9 9h1m4 0h1m-6 4h1m4 0h1m-6 4h1m4 0h1',
-    refresh: 'M4 4v6h6M20 20v-6h-6M5.1 15a8 8 0 0013.2 2M18.9 9A8 8 0 005.7 7',
-    check: 'M5 13l4 4L19 7',
-    chart: 'M4 19V9m5 10V5m5 14v-7m5 7V3',
-  }
-  return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d={paths[name]} />
-    </svg>
-  )
-}
+// Категориальная палитра графиков (chart-1…6). Классы перечислены целиком, чтобы их увидел Tailwind.
+const CHART = [
+  { bg: 'bg-chart-1', stroke: 'stroke-chart-1' },
+  { bg: 'bg-chart-2', stroke: 'stroke-chart-2' },
+  { bg: 'bg-chart-3', stroke: 'stroke-chart-3' },
+  { bg: 'bg-chart-4', stroke: 'stroke-chart-4' },
+  { bg: 'bg-chart-5', stroke: 'stroke-chart-5' },
+  { bg: 'bg-chart-6', stroke: 'stroke-chart-6' },
+]
+// «Остальные» — нейтральный цвет вне палитры; хорошо/плохо — статусные цвета.
+const COLOR_OTHER = { bg: 'bg-line-strong', stroke: 'stroke-line-strong' }
+const COLOR_GOOD = { bg: 'bg-success', stroke: 'stroke-success' }
+const COLOR_BAD = { bg: 'bg-danger', stroke: 'stroke-danger' }
 
-function MetricCard({ label, value, note, icon, tone = 'navy' }) {
-  const tones = {
-    navy: 'border-l-[#163A63] text-[#163A63] dark:text-blue-300',
-    green: 'border-l-emerald-600 text-emerald-700 dark:text-emerald-400',
-    amber: 'border-l-amber-600 text-amber-700 dark:text-amber-400',
-    red: 'border-l-red-600 text-red-700 dark:text-red-400',
-  }
-  return (
-    <article className={`rounded-lg border border-slate-200 border-l-4 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900 ${tones[tone]}`}>
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-sm font-medium text-slate-600 dark:text-slate-300">{label}</p>
-          <p className="mt-2 text-3xl font-bold tracking-tight">{value}</p>
-        </div>
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-          <Icon name={icon} />
-        </div>
-      </div>
-      <p className="mt-3 border-t border-slate-100 pt-3 text-xs leading-5 text-slate-500 dark:border-slate-800 dark:text-slate-400">{note}</p>
-    </article>
-  )
-}
-
-function ProgressMetric({ label, value, display, target, tone }) {
-  const width = Math.max(0, Math.min(100, value))
-  const tones = {
-    navy: 'bg-[#1E4E79]',
-    green: 'bg-emerald-600',
-    amber: 'bg-amber-600',
-    red: 'bg-red-600',
-  }
-  return (
-    <div>
-      <div className="mb-2 flex items-end justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">{label}</p>
-          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{target}</p>
-        </div>
-        <span className="text-lg font-bold text-slate-900 dark:text-white">{display}</span>
-      </div>
-      <div className="h-2 overflow-hidden rounded-lg bg-slate-200 dark:bg-slate-700" role="progressbar" aria-label={label} aria-valuenow={Math.round(value)} aria-valuemin="0" aria-valuemax="100">
-        <div className={`h-full rounded-lg ${tones[tone]}`} style={{ width: `${width}%` }} />
-      </div>
-    </div>
-  )
-}
+const BAR_TONE = { success: 'bg-success', warning: 'bg-warning', danger: 'bg-danger' }
 
 function formatPercent(value) {
   return `${value.toFixed(1)}%`
 }
 
-function PieChart({ title, subtitle, items, emptyText = 'Нет данных' }) {
-  const size = 180
+// Значение «8.9 / 10»: число крупно и без переноса, шкала — приглушённо (переносится, если не помещается).
+function ScoreValue({ value, outOf }) {
+  return (
+    <span className="inline-flex min-w-0 flex-wrap items-baseline gap-x-1">
+      <span className="whitespace-nowrap">{value}</span>
+      <span className="min-w-0 text-base font-medium text-fg-subtle [overflow-wrap:anywhere]">{outOf}</span>
+    </span>
+  )
+}
+
+// Полоса выполнения контрольного ориентира.
+function ProgressMetric({ label, value, display, target, tone }) {
+  const width = Math.max(0, Math.min(100, value))
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <div className="flex min-w-0 items-end justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-fg">{label}</p>
+          <p className="mt-0.5 text-xs text-fg-subtle">{target}</p>
+        </div>
+        <span className="min-w-0 max-w-[50%] shrink-0 text-right text-lg font-semibold tabular text-fg">{display}</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-surface-hover" role="progressbar" aria-label={label}
+        aria-valuenow={Math.round(value)} aria-valuemin="0" aria-valuemax="100">
+        <div className={cn('h-full rounded-full', BAR_TONE[tone])} style={{ width: `${width}%` }} />
+      </div>
+    </div>
+  )
+}
+
+// Кольцевая диаграмма с легендой. Подписи легенды переносятся, значения — в одну строку.
+function DonutChart({ title, description, items, emptyText, totalLabel, locale }) {
+  const size = 160
   const strokeWidth = 18
   const radius = (size - strokeWidth) / 2
   const circumference = 2 * Math.PI * radius
@@ -81,105 +67,119 @@ function PieChart({ title, subtitle, items, emptyText = 'Нет данных' })
   let offset = 0
 
   return (
-    <article className="rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-      <div className="border-b border-slate-200 px-5 py-4 dark:border-slate-700">
-        <p className="text-xs font-bold uppercase tracking-[0.14em] text-cyan-700 dark:text-cyan-300">{subtitle}</p>
-        <h3 className="mt-1 text-lg font-bold tracking-tight text-slate-900 dark:text-white">{title}</h3>
-      </div>
-      <div className="grid gap-5 p-5 lg:grid-cols-[200px_1fr] lg:items-center">
-        <div className="relative mx-auto flex h-[200px] w-[200px] items-center justify-center">
-          {total > 0 ? (
-            <>
-              <svg viewBox={`0 0 ${size} ${size}`} className="h-full w-full -rotate-90">
-                {items.map((item) => {
-                  const value = Number(item.value || 0)
-                  const dash = (value / total) * circumference
-                  const currentOffset = offset
-                  offset += dash
-                  return (
-                    <circle
-                      key={item.label}
-                      cx={size / 2}
-                      cy={size / 2}
-                      r={radius}
-                      fill="none"
-                      stroke={item.color}
-                      strokeWidth={strokeWidth}
-                      strokeDasharray={`${dash} ${circumference - dash}`}
-                      strokeDashoffset={-currentOffset}
-                      strokeLinecap="round"
-                    />
-                  )
-                })}
-              </svg>
-              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
-                <span className="text-2xl font-bold text-slate-900 dark:text-white">{total.toLocaleString()}</span>
-                <span className="mt-1 text-xs font-medium uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Всего</span>
-              </div>
-            </>
-          ) : (
-            <div className="flex h-full w-full items-center justify-center rounded-full border border-dashed border-slate-300 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
-              {emptyText}
-            </div>
-          )}
-        </div>
-        <div className="space-y-3">
-          {items.map((item) => (
-            <div key={item.label} className="flex items-center gap-3">
-              <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-3 text-sm">
-                  <span className="truncate font-medium text-slate-700 dark:text-slate-200">{item.label}</span>
-                  <span className="font-bold text-slate-900 dark:text-white">{item.valueLabel}</span>
-                </div>
-                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-                  <div className="h-full rounded-full" style={{ width: `${total ? (item.value / total) * 100 : 0}%`, backgroundColor: item.color }} />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </article>
-  )
-}
-
-function BarChart({ title, subtitle, items, emptyText = 'Нет данных' }) {
-  const maxValue = Math.max(...items.map((item) => Number(item.value || 0)), 0)
-  return (
-    <article className="rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-      <div className="border-b border-slate-200 px-5 py-4 dark:border-slate-700">
-        <p className="text-xs font-bold uppercase tracking-[0.14em] text-cyan-700 dark:text-cyan-300">{subtitle}</p>
-        <h3 className="mt-1 text-lg font-bold tracking-tight text-slate-900 dark:text-white">{title}</h3>
-      </div>
-      <div className="space-y-4 p-5">
-        {items.length === 0 ? (
-          <p className="text-sm text-slate-500 dark:text-slate-400">{emptyText}</p>
-        ) : items.map((item) => (
-          <div key={item.label}>
-            <div className="mb-1.5 flex items-center justify-between gap-3 text-sm">
-              <span className="truncate font-medium text-slate-700 dark:text-slate-200">{item.label}</span>
-              <span className="font-bold text-slate-900 dark:text-white">{item.valueLabel}</span>
-            </div>
-            <div className="h-3 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-              <div className="h-full rounded-full bg-gradient-to-r from-cyan-500 via-blue-600 to-[#163A63]" style={{ width: `${maxValue ? (item.value / maxValue) * 100 : 0}%` }} />
+    <Card>
+      <CardHeader title={title} description={description} />
+      {total > 0 ? (
+        <CardBody className="grid gap-6 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center">
+          {/* Подпись в центре кольца — через наложение ячеек грида, без абсолютного позиционирования */}
+          <div className="mx-auto grid h-40 w-40 shrink-0 place-items-center">
+            <svg viewBox={`0 0 ${size} ${size}`} className="h-full w-full -rotate-90 [grid-area:1/1]" aria-hidden="true">
+              <circle cx={size / 2} cy={size / 2} r={radius} fill="none" strokeWidth={strokeWidth} className="stroke-surface-hover" />
+              {items.map((item) => {
+                const value = Number(item.value || 0)
+                const dash = (value / total) * circumference
+                const currentOffset = offset
+                offset += dash
+                return (
+                  <circle
+                    key={item.label}
+                    cx={size / 2}
+                    cy={size / 2}
+                    r={radius}
+                    fill="none"
+                    className={item.color.stroke}
+                    strokeWidth={strokeWidth}
+                    strokeDasharray={`${dash} ${circumference - dash}`}
+                    strokeDashoffset={-currentOffset}
+                  />
+                )
+              })}
+            </svg>
+            <div className="flex max-w-[6.5rem] flex-col items-center text-center [grid-area:1/1]">
+              <span className="text-2xl font-semibold tabular text-fg">{total.toLocaleString(locale)}</span>
+              <span className="max-w-full text-xs text-fg-subtle [overflow-wrap:anywhere]">{totalLabel}</span>
             </div>
           </div>
-        ))}
-      </div>
-    </article>
+          <ul className="flex min-w-0 flex-col gap-3">
+            {items.map((item) => (
+              <li key={item.label} className="flex min-w-0 items-start gap-3">
+                <span className={cn('mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full', item.color.bg)} aria-hidden="true" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-start justify-between gap-3 text-sm">
+                    <span className="min-w-0 text-fg">{item.label}</span>
+                    <span className="shrink-0 whitespace-nowrap font-semibold tabular text-fg">{item.valueLabel}</span>
+                  </div>
+                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface-hover">
+                    <div className={cn('h-full rounded-full', item.color.bg)} style={{ width: `${(item.value / total) * 100}%` }} />
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </CardBody>
+      ) : (
+        <EmptyState icon="chart" title={emptyText} compact />
+      )}
+    </Card>
   )
 }
 
-function DashboardSkeleton() {
+// Горизонтальные столбики рейтинга (один цвет: категории здесь не кодируются цветом).
+function BarChart({ title, description, items, emptyText }) {
+  const maxValue = Math.max(...items.map((item) => Number(item.value || 0)), 0)
   return (
-    <div className="space-y-5 animate-pulse" aria-label="Загрузка панели">
-      <div className="h-28 rounded-lg bg-slate-200 dark:bg-slate-800" />
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {[1, 2, 3, 4].map((item) => <div key={item} className="h-36 rounded-lg bg-slate-200 dark:bg-slate-800" />)}
-      </div>
-      <div className="h-72 rounded-lg bg-slate-200 dark:bg-slate-800" />
+    <Card>
+      <CardHeader title={title} description={description} />
+      {items.length === 0 ? (
+        <EmptyState icon="chart" title={emptyText} compact />
+      ) : (
+        <CardBody>
+          <ul className="flex min-w-0 flex-col gap-4">
+            {items.map((item) => (
+              <li key={item.label} className="min-w-0">
+                <div className="mb-1.5 flex min-w-0 items-start justify-between gap-3 text-sm">
+                  <span className="min-w-0 text-fg">{item.label}</span>
+                  <span className="shrink-0 whitespace-nowrap font-semibold tabular text-fg">{item.valueLabel}</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-surface-hover">
+                  <div className="h-full rounded-full bg-chart-1" style={{ width: `${maxValue ? (item.value / maxValue) * 100 : 0}%` }} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </CardBody>
+      )}
+    </Card>
+  )
+}
+
+// Плитка оперативной сводки.
+function SummaryTile({ label, value, note }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1 rounded-md bg-surface-muted p-4">
+      <p className="text-xs font-medium text-fg-subtle">{label}</p>
+      <p className="text-base font-semibold text-fg">{value}</p>
+      <p className="text-sm text-fg-muted">{note}</p>
     </div>
+  )
+}
+
+function DashboardSkeleton({ label }) {
+  return (
+    <PageStack>
+      <div role="status" aria-busy="true" className="flex min-w-0 flex-col gap-6">
+        <span className="sr-only">{label}</span>
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-8 w-48" />
+          <Skeleton className="h-4 w-full max-w-md" />
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {[1, 2, 3, 4].map((item) => <Skeleton key={item} className="h-32" rounded="rounded-lg" />)}
+        </div>
+        <Skeleton className="h-24" rounded="rounded-lg" />
+        <Skeleton className="h-72" rounded="rounded-lg" />
+      </div>
+    </PageStack>
   )
 }
 
@@ -193,19 +193,43 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [retryKey, setRetryKey] = useState(0)
+  // Учебный год: '' — все годы; null — ещё не определён (ждём справочник, чтобы не грузить данные дважды)
+  const [years, setYears] = useState([])
+  const [selectedYear, setSelectedYear] = useState(null)
 
+  // Для форматирования дат и чисел: в Intl казахский язык — 'kk'
+  const locale = intlLocale(i18n.language)
+
+  // По умолчанию — текущий учебный год по дате (новый начинается 1 сентября), как на сервере
   useEffect(() => {
-    getRecordFilterOptions()
-      .then((data) => setFilterOptions(data || { faculties: [], ops: [] }))
-      .catch(() => setFilterOptions({ faculties: [], ops: [] }))
+    getAcademicYears()
+      .then((data) => {
+        const list = data || []
+        setYears(list)
+        const now = new Date()
+        const start = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1
+        const current = `${start}-${start + 1}`
+        const fallback = list.find((item) => item.is_default)?.name
+        setSelectedYear(list.some((item) => item.name === current) ? current : (fallback || ''))
+      })
+      .catch(() => setSelectedYear(''))
   }, [])
 
   useEffect(() => {
+    if (selectedYear === null) return
+    getRecordFilterOptions({ academic_year: selectedYear || undefined })
+      .then((data) => setFilterOptions(data || { faculties: [], ops: [] }))
+      .catch(() => setFilterOptions({ faculties: [], ops: [] }))
+  }, [selectedYear])
+
+  useEffect(() => {
+    if (selectedYear === null) return
     setLoading(true)
     setError('')
+    const params = { faculty: selectedFaculty || undefined, op: selectedOp || undefined, academic_year: selectedYear || undefined }
     Promise.all([
-      getDashboardStats({ faculty: selectedFaculty || undefined, op: selectedOp || undefined }),
-      getDashboardFacultyComparison({ faculty: selectedFaculty || undefined, op: selectedOp || undefined }),
+      getDashboardStats(params),
+      getDashboardFacultyComparison(params),
     ])
       .then(([statsData, comparisonData]) => {
         setStats(statsData)
@@ -213,7 +237,7 @@ export default function DashboardPage() {
       })
       .catch(() => setError(t('dashboard.loadError')))
       .finally(() => setLoading(false))
-  }, [selectedFaculty, selectedOp, retryKey, t])
+  }, [selectedFaculty, selectedOp, selectedYear, retryKey, t])
 
   const facultyOptions = useMemo(() => filterOptions?.faculties || [], [filterOptions])
   const opOptions = useMemo(() => {
@@ -238,9 +262,10 @@ export default function DashboardPage() {
   const problems = Number(stats?.problem_records || 0)
   const total = Number(stats?.total_records || 0)
   const problemShare = total ? (problems / total) * 100 : 0
+  // Нет записей за выбранный период — показатели не считаются (а не «0 / ниже нормы»)
+  const empty = !loading && total === 0
   const cleanShare = Math.max(0, 100 - problemShare)
 
-  const chartPalette = ['#0EA5E9', '#1D4ED8', '#14B8A6', '#F59E0B', '#EF4444', '#8B5CF6', '#22C55E', '#64748B']
   const recordsPieItems = useMemo(() => {
     if (sortedComparison.length === 0) return []
     const topByRecords = [...sortedComparison]
@@ -254,250 +279,338 @@ export default function DashboardPage() {
         return {
           label: item.label,
           value,
-          valueLabel: `${value.toLocaleString(i18n.language)} (${formatPercent(total ? (value / total) * 100 : 0)})`,
-          color: chartPalette[index % chartPalette.length],
+          valueLabel: `${value.toLocaleString(locale)} (${formatPercent(total ? (value / total) * 100 : 0)})`,
+          color: CHART[index % CHART.length],
         }
       }),
       ...(other > 0
         ? [{
-            label: 'Остальные',
+            label: t('dash.distribution.other'),
             value: other,
-            valueLabel: `${other.toLocaleString(i18n.language)} (${formatPercent(total ? (other / total) * 100 : 0)})`,
-            color: '#94A3B8',
+            valueLabel: `${other.toLocaleString(locale)} (${formatPercent(total ? (other / total) * 100 : 0)})`,
+            color: COLOR_OTHER,
           }]
         : []),
     ]
-  }, [chartPalette, i18n.language, sortedComparison, total])
+  }, [locale, sortedComparison, total, t])
 
   const issuePieItems = useMemo(() => ([
-    { label: 'Нормальные записи', value: cleanShare, valueLabel: formatPercent(cleanShare), color: '#10B981' },
-    { label: 'Проблемные записи', value: problemShare, valueLabel: formatPercent(problemShare), color: '#EF4444' },
-  ]), [cleanShare, problemShare])
+    { label: t('dash.quality.normal'), value: cleanShare, valueLabel: formatPercent(cleanShare), color: COLOR_GOOD },
+    { label: t('dash.quality.problem'), value: problemShare, valueLabel: formatPercent(problemShare), color: COLOR_BAD },
+  ]), [cleanShare, problemShare, t])
 
-  const scoreBarItems = useMemo(() => sortedComparison.slice(0, 8).map((item, index) => ({
+  const scoreBarItems = useMemo(() => sortedComparison.slice(0, 8).map((item) => ({
     label: item.label,
     value: Number(item.avg_score || 0),
-    valueLabel: `${Number(item.avg_score || 0).toFixed(1)} / 10`,
-    color: chartPalette[index % chartPalette.length],
-  })), [chartPalette, sortedComparison])
+    valueLabel: `${Number(item.avg_score || 0).toFixed(1)} ${t('dash.outOf10')}`,
+  })), [sortedComparison, t])
 
   const hasFilters = Boolean(selectedFaculty || selectedOp)
-  const formattedDate = new Intl.DateTimeFormat(i18n.language || 'ru', {
+  const formattedDate = new Intl.DateTimeFormat(locale || 'ru', {
     day: '2-digit',
     month: 'long',
     year: 'numeric',
   }).format(new Date())
+
+  const currentYearName = (() => {
+    const now = new Date()
+    const start = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1
+    return `${start}-${start + 1}`
+  })()
 
   const resetFilters = () => {
     setSelectedFaculty('')
     setSelectedOp('')
   }
 
-  if (!stats && loading) return <DashboardSkeleton />
+  const bestItem = sortedComparison[0]
+  const attentionItem = sortedComparison.find((item) => Number(item.problem_records || 0) > 0)
+
+  const comparisonColumns = [
+    {
+      key: 'label',
+      header: t('dash.compare.colUnit'),
+      mobile: 'title',
+      minWidth: '16rem',
+      cell: (item, index) => (
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="w-6 shrink-0 text-right text-fg-subtle tabular">{index + 1}</span>
+          <span className="min-w-0 font-medium text-fg">{item.label}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'avg_score',
+      header: (
+        <span className="inline-flex items-center gap-1">
+          {t('dash.compare.colScore')}
+          <Icon name="arrow-down" size={14} />
+          <span className="sr-only">{t('dash.compare.sortedDesc')}</span>
+        </span>
+      ),
+      mobileLabel: t('dash.compare.colScore'),
+      minWidth: '10rem',
+      cell: (item) => {
+        const itemScore = Number(item.avg_score || 0)
+        return (
+          <div className="flex min-w-0 items-center gap-3">
+            <span className={cn('w-8 shrink-0 font-semibold tabular', itemScore >= 7 ? 'text-success' : 'text-warning')}>
+              {itemScore.toFixed(1)}
+            </span>
+            <div className="h-1.5 min-w-12 flex-1 overflow-hidden rounded-full bg-surface-hover">
+              <div className="h-full rounded-full bg-chart-1" style={{ width: `${Math.min(100, itemScore * 10)}%` }} />
+            </div>
+          </div>
+        )
+      },
+    },
+    {
+      key: 'avg_attendance',
+      header: t('dash.compare.colAttendance'),
+      align: 'right',
+      nowrap: true,
+      cell: (item) => <span className="tabular">{Number(item.avg_attendance || 0).toFixed(1)}%</span>,
+    },
+    {
+      key: 'problem_records',
+      header: t('dash.compare.colProblems'),
+      align: 'right',
+      nowrap: true,
+      cell: (item) => {
+        const count = Number(item.problem_records || 0)
+        return <Badge tone={count > 0 ? 'danger' : 'success'} className="tabular">{count}</Badge>
+      },
+    },
+  ]
+
+  if (!stats && loading) return <DashboardSkeleton label={t('dash.loading')} />
 
   return (
-    <div className="cyber-dashboard w-full space-y-5">
-      <header className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-        <div className="h-1 bg-gradient-to-r from-cyan-400 via-blue-500 to-transparent" />
-        <div className="flex flex-col gap-5 p-5 sm:p-6 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-3xl">
-            <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-cyan-700 dark:text-cyan-300">
-              <Icon name="building" className="h-4 w-4" />
-              KRK // Security Operations Center
-            </div>
-            <h1 className="text-3xl font-bold leading-tight tracking-tight text-slate-950 dark:text-white sm:text-4xl">
-              Центр ситуационного контроля
-            </h1>
-            <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">
-              Оперативная картина качества занятий, видеомониторинга и выявленных отклонений
-            </p>
-          </div>
-          <div className="border-l-2 border-amber-600 pl-4 lg:text-right">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Состояние контура</p>
-            <p className="mt-1 font-semibold text-slate-900 dark:text-white">{formattedDate}</p>
-            <p className="mt-1 text-xs text-emerald-700 dark:text-emerald-400">● {hasFilters ? 'Фильтр активен' : 'Все подразделения онлайн'}</p>
-          </div>
+    <PageStack>
+      <PageHeader
+        title={t('dashboard.title')}
+        description={t('dash.description')}
+        actions={
+          <Field label={t('dash.year.label')} className="w-full sm:w-56">
+            <Select
+              value={selectedYear ?? ''}
+              onChange={(event) => { setSelectedYear(event.target.value); setSelectedFaculty(''); setSelectedOp('') }}
+              placeholder={t('dash.year.all')}
+              options={years.map((item) => ({
+                value: item.name,
+                label: item.name === currentYearName ? `${item.name} · ${t('dash.year.current')}` : item.name,
+              }))}
+            />
+          </Field>
+        }
+      >
+        <div className="mt-3 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-sm text-fg-muted">
+          <span className="inline-flex items-center gap-1.5">
+            <Icon name="calendar" size={16} className="text-fg-subtle" />
+            {t('dash.asOf', { date: formattedDate })}
+          </span>
+          <Badge tone="primary" icon="calendar">
+            {selectedYear ? t('dash.year.badge', { year: selectedYear }) : t('dash.year.all')}
+          </Badge>
+          <Badge tone={hasFilters ? 'info' : 'neutral'} dot>
+            {hasFilters ? t('dash.scopeFiltered') : t('dash.scopeAll')}
+          </Badge>
         </div>
-      </header>
-
-      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900" aria-labelledby="dashboard-filters">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Icon name="filter" className="h-4 w-4 text-[#163A63] dark:text-blue-300" />
-            <h2 id="dashboard-filters" className="text-sm font-bold uppercase tracking-wide text-slate-800 dark:text-slate-100">{t('dashboard.filters')}</h2>
-          </div>
-          <div className="flex items-center gap-3">
-            {loading && <span className="text-xs font-medium text-slate-500" role="status">Обновление данных…</span>}
-            {hasFilters && (
-            <button type="button" onClick={resetFilters} className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-700 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">
-              <Icon name="refresh" className="h-4 w-4" />
-              Сбросить
-            </button>
-            )}
-          </div>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <label>
-            <span className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">{t('dashboard.faculty')}</span>
-            <select className="input min-h-11 cursor-pointer rounded-lg text-base" value={selectedFaculty} onChange={(event) => { setSelectedFaculty(event.target.value); setSelectedOp('') }}>
-              <option value="">{t('dashboard.allFaculties')}</option>
-              {facultyOptions.map((faculty) => <option key={faculty.name} value={faculty.name}>{faculty.name}</option>)}
-            </select>
-          </label>
-          <label>
-            <span className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">{t('dashboard.op')}</span>
-            <select className="input min-h-11 cursor-pointer rounded-lg text-base" value={selectedOp} onChange={(event) => setSelectedOp(event.target.value)}>
-              <option value="">{t('dashboard.allOp')}</option>
-              {opOptions.map((op) => <option key={op.id} value={op.name}>{op.name}</option>)}
-            </select>
-          </label>
-        </div>
-      </section>
+      </PageHeader>
 
       {error && (
-        <div className="flex flex-col gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300 sm:flex-row sm:items-center sm:justify-between" role="alert">
-          <span>{error}</span>
-          <button type="button" onClick={() => setRetryKey((value) => value + 1)} className="min-h-11 cursor-pointer rounded-lg border border-red-300 px-4 font-semibold transition-colors hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-600 dark:border-red-800 dark:hover:bg-red-950">Повторить</button>
-        </div>
+        <Alert
+          tone="danger"
+          action={<Button variant="secondary" size="sm" icon="refresh" onClick={() => setRetryKey((value) => value + 1)}>{t('ui.retry')}</Button>}
+        >
+          {error}
+        </Alert>
       )}
 
-      <section className={`grid gap-4 sm:grid-cols-2 xl:grid-cols-4 ${loading ? 'opacity-60' : ''}`} aria-label="Ключевые показатели" aria-busy={loading}>
-        <MetricCard label={t('dashboard.totalRecords')} value={total.toLocaleString(i18n.language)} note="Объём записей в текущей выборке" icon="document" />
-        <MetricCard label={t('dashboard.avgScore')} value={`${score.toFixed(1)} / 10`} note={score >= 7 ? 'Показатель соответствует целевому уровню' : 'Показатель ниже целевого уровня 7.0'} icon="quality" tone={score >= 7 ? 'green' : score >= 5 ? 'amber' : 'red'} />
-        <MetricCard label={t('dashboard.avgAttendance')} value={`${attendance.toFixed(1)}%`} note={attendance >= 75 ? 'Целевой уровень посещаемости достигнут' : 'Требуется повышение до уровня 75%'} icon="attendance" tone={attendance >= 75 ? 'green' : 'amber'} />
-        <MetricCard label={t('dashboard.problemRecords')} value={problems.toLocaleString(i18n.language)} note={`${problemShare.toFixed(1)}% от общего количества записей`} icon="alert" tone={problems > 0 ? 'red' : 'green'} />
-      </section>
+      {stats && (
+        <>
+          <section
+            aria-label={t('dash.kpiLabel')}
+            aria-busy={loading}
+            className={cn('grid grid-cols-1 gap-4 transition-opacity sm:grid-cols-2 xl:grid-cols-4', loading && 'opacity-60')}
+          >
+            <StatCard
+              label={t('dashboard.totalRecords')}
+              value={total.toLocaleString(locale)}
+              hint={t('dash.kpi.totalNote')}
+              icon="file-text"
+            />
+            <StatCard
+              label={t('dashboard.avgScore')}
+              value={empty ? '—' : <ScoreValue value={score.toFixed(1)} outOf={t('dash.outOf10')} />}
+              hint={empty ? t('dash.kpi.noRecords') : score >= 7 ? t('dash.kpi.scoreOk') : t('dash.kpi.scoreLow')}
+              icon="star"
+              tone={empty ? 'neutral' : score >= 7 ? 'success' : score >= 5 ? 'warning' : 'danger'}
+            />
+            <StatCard
+              label={t('dashboard.avgAttendance')}
+              value={empty ? '—' : <span className="whitespace-nowrap">{attendance.toFixed(1)}%</span>}
+              hint={empty ? t('dash.kpi.noRecords') : attendance >= 75 ? t('dash.kpi.attendanceOk') : t('dash.kpi.attendanceLow')}
+              icon="user-check"
+              tone={empty ? 'neutral' : attendance >= 75 ? 'success' : 'warning'}
+            />
+            <StatCard
+              label={t('dashboard.problemRecords')}
+              value={problems.toLocaleString(locale)}
+              hint={empty ? t('dash.kpi.noRecords') : t('dash.kpi.problemsNote', { value: problemShare.toFixed(1) })}
+              icon="alert"
+              tone={empty ? 'neutral' : problems > 0 ? 'danger' : 'success'}
+            />
+          </section>
 
-      <section className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]">
-        <article className="rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-          <div className="border-b border-slate-200 px-5 py-4 dark:border-slate-700">
-            <p className="text-xs font-bold uppercase tracking-[0.14em] text-amber-700 dark:text-amber-400">Контрольные ориентиры</p>
-            <h2 className="mt-1 text-xl font-bold tracking-tight text-slate-900 dark:text-white">Выполнение ключевых показателей</h2>
-          </div>
-          <div className="space-y-7 p-5">
-            <ProgressMetric label="Средняя оценка качества" value={score * 10} display={`${score.toFixed(1)} / 10`} target="Целевое значение: не менее 7.0" tone={score >= 7 ? 'green' : 'amber'} />
-            <ProgressMetric label="Средняя посещаемость" value={attendance} display={`${attendance.toFixed(1)}%`} target="Целевое значение: не менее 75%" tone={attendance >= 75 ? 'green' : 'amber'} />
-            <ProgressMetric label="Доля проблемных записей" value={problemShare} display={`${problemShare.toFixed(1)}%`} target="Чем ниже показатель, тем лучше" tone={problemShare <= 10 ? 'green' : 'red'} />
-          </div>
-        </article>
+          <section aria-label={t('dashboard.filters')}>
+            <FilterBar
+              actions={(loading || hasFilters) && (
+                <>
+                  {loading && (
+                    <span role="status" className="inline-flex items-center gap-2 text-sm text-fg-muted">
+                      <Spinner size={16} />
+                      {t('dash.updating')}
+                    </span>
+                  )}
+                  {hasFilters && (
+                    <Button variant="secondary" size="sm" icon="rotate-ccw" onClick={resetFilters}>
+                      {t('dash.reset')}
+                    </Button>
+                  )}
+                </>
+              )}
+            >
+              <Field label={t('dashboard.faculty')}>
+                <Select
+                  value={selectedFaculty}
+                  onChange={(event) => { setSelectedFaculty(event.target.value); setSelectedOp('') }}
+                  placeholder={t('dashboard.allFaculties')}
+                  options={facultyOptions.map((faculty) => ({ value: faculty.name, label: faculty.name }))}
+                />
+              </Field>
+              <Field label={t('dashboard.op')}>
+                <Select
+                  value={selectedOp}
+                  onChange={(event) => setSelectedOp(event.target.value)}
+                  placeholder={t('dashboard.allOp')}
+                  options={opOptions.map((op) => ({ value: op.name, label: op.name }))}
+                />
+              </Field>
+            </FilterBar>
+          </section>
 
-        <article className="rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-          <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-700">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.14em] text-amber-700 dark:text-amber-400">Структурный анализ</p>
-              <h2 className="mt-1 text-xl font-bold tracking-tight text-slate-900 dark:text-white">{comparisonTitle}</h2>
-            </div>
-            <Icon name="chart" className="h-6 w-6 text-slate-400" />
-          </div>
-
-          {sortedComparison.length === 0 ? (
-            <p className="p-5 text-sm text-slate-500 dark:text-slate-400">{t('dashboard.noDataChart')}</p>
-          ) : (
-            <div className="max-h-[430px] overflow-auto">
-              <table className="w-full min-w-[680px] text-left text-sm">
-                <thead className="sticky top-0 z-10 bg-slate-50 text-xs font-bold uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-300">
-                  <tr>
-                    <th className="w-12 px-4 py-3 text-center">№</th>
-                    <th className="px-4 py-3">Подразделение</th>
-                    <th className="px-4 py-3" aria-sort="descending">Оценка ↓</th>
-                    <th className="px-4 py-3">Посещаемость</th>
-                    <th className="px-4 py-3 text-right">Проблемы</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {sortedComparison.map((item, index) => {
-                    const itemScore = Number(item.avg_score || 0)
-                    const itemAttendance = Number(item.avg_attendance || 0)
-                    return (
-                      <tr key={item.label} className="transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/60">
-                        <td className="px-4 py-3 text-center font-semibold text-slate-400">{index + 1}</td>
-                        <td className="max-w-[320px] px-4 py-3 font-semibold text-slate-800 dark:text-slate-100">{item.label}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex min-w-[130px] items-center gap-3">
-                            <span className={`w-8 font-bold ${itemScore >= 7 ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'}`}>{itemScore.toFixed(1)}</span>
-                            <div className="h-1.5 flex-1 rounded-lg bg-slate-200 dark:bg-slate-700"><div className="h-full rounded-lg bg-[#1E4E79]" style={{ width: `${Math.min(100, itemScore * 10)}%` }} /></div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 font-medium text-slate-700 dark:text-slate-200">{itemAttendance.toFixed(1)}%</td>
-                        <td className="px-4 py-3 text-right">
-                          <span className={`inline-flex min-w-8 justify-center rounded-lg border px-2 py-1 text-xs font-bold ${Number(item.problem_records || 0) > 0 ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300' : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300'}`}>
-                            {Number(item.problem_records || 0)}
-                          </span>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+          {!loading && total === 0 && (
+            <Alert tone="info">{selectedYear ? t('dash.year.noData', { year: selectedYear }) : t('dashboard.noData')}</Alert>
           )}
-        </article>
-      </section>
 
-      <section className="grid gap-4 xl:grid-cols-2">
-        <PieChart
-          title="Распределение записей"
-          subtitle="Структура выборки"
-          items={recordsPieItems}
-          emptyText="Нет записей для отображения"
-        />
-        <PieChart
-          title="Качество выборки"
-          subtitle="Проблемные vs нормальные"
-          items={issuePieItems}
-          emptyText="Нет данных по проблемным записям"
-        />
-      </section>
+          <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+            <Card>
+              <CardHeader title={t('dash.targets.title')} description={t('dash.targets.description')} />
+              <CardBody className="flex flex-col gap-6">
+                <ProgressMetric
+                  label={t('dash.targets.score')}
+                  value={score * 10}
+                  display={`${score.toFixed(1)} ${t('dash.outOf10')}`}
+                  target={t('dash.targets.scoreTarget')}
+                  tone={score >= 7 ? 'success' : 'warning'}
+                />
+                <ProgressMetric
+                  label={t('dash.targets.attendance')}
+                  value={attendance}
+                  display={`${attendance.toFixed(1)}%`}
+                  target={t('dash.targets.attendanceTarget')}
+                  tone={attendance >= 75 ? 'success' : 'warning'}
+                />
+                <ProgressMetric
+                  label={t('dash.targets.problems')}
+                  value={problemShare}
+                  display={`${problemShare.toFixed(1)}%`}
+                  target={t('dash.targets.problemsTarget')}
+                  tone={problemShare <= 10 ? 'success' : 'danger'}
+                />
+              </CardBody>
+            </Card>
 
-      <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-        <BarChart
-          title="Рейтинг подразделений по качеству"
-          subtitle="Средняя оценка"
-          items={scoreBarItems}
-          emptyText="Нет данных для сравнения"
-        />
-        <article className="rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-          <div className="border-b border-slate-200 px-5 py-4 dark:border-slate-700">
-            <p className="text-xs font-bold uppercase tracking-[0.14em] text-cyan-700 dark:text-cyan-300">Оперативная сводка</p>
-            <h2 className="mt-1 text-xl font-bold tracking-tight text-slate-900 dark:text-white">Что смотреть в первую очередь</h2>
+            <Card>
+              <CardHeader title={comparisonTitle} description={t('dash.compare.description')} />
+              <DataTable
+                columns={comparisonColumns}
+                rows={sortedComparison}
+                rowKey="label"
+                maxHeight="27rem"
+                caption={comparisonTitle}
+                empty={<EmptyState icon="chart" title={t('dashboard.noDataChart')} compact />}
+              />
+            </Card>
           </div>
-          <div className="grid gap-3 p-5 sm:grid-cols-2">
-            <div className="rounded-xl bg-slate-50 p-4 dark:bg-slate-800/60">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Лучший показатель</p>
-              <p className="mt-2 text-lg font-bold text-slate-900 dark:text-white">{sortedComparison[0]?.label || 'Нет данных'}</p>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                {sortedComparison[0] ? `${Number(sortedComparison[0].avg_score || 0).toFixed(1)} / 10` : 'Недостаточно информации'}
-              </p>
-            </div>
-            <div className="rounded-xl bg-slate-50 p-4 dark:bg-slate-800/60">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Зона внимания</p>
-              <p className="mt-2 text-lg font-bold text-slate-900 dark:text-white">
-                {sortedComparison.find((item) => Number(item.problem_records || 0) > 0)?.label || 'Нет проблемных записей'}
-              </p>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                {sortedComparison.find((item) => Number(item.problem_records || 0) > 0)
-                  ? `${sortedComparison.find((item) => Number(item.problem_records || 0) > 0).problem_records} проблемных записей`
-                  : 'Ситуация стабильна'}
-              </p>
-            </div>
-            <div className="rounded-xl bg-slate-50 p-4 dark:bg-slate-800/60">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Всего записей</p>
-              <p className="mt-2 text-lg font-bold text-slate-900 dark:text-white">{total.toLocaleString(i18n.language)}</p>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">В текущей выборке</p>
-            </div>
-            <div className="rounded-xl bg-slate-50 p-4 dark:bg-slate-800/60">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Проблемные записи</p>
-              <p className="mt-2 text-lg font-bold text-slate-900 dark:text-white">{problems.toLocaleString(i18n.language)}</p>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{formatPercent(problemShare)} от общего объёма</p>
-            </div>
-          </div>
-        </article>
-      </section>
 
-      <footer className="flex flex-col gap-2 border-t border-slate-200 py-4 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400 sm:flex-row sm:items-center sm:justify-between">
-        <p>Источник: информационная система Комитета ректорского контроля</p>
-        <p className="inline-flex items-center gap-1.5"><Icon name="check" className="h-4 w-4 text-emerald-600" /> Данные сформированы по текущей выборке</p>
-      </footer>
-    </div>
+          <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-2">
+            <DonutChart
+              title={t('dash.distribution.title')}
+              description={t('dash.distribution.description')}
+              items={recordsPieItems}
+              emptyText={t('dash.distribution.empty')}
+              totalLabel={t('dash.total')}
+              locale={locale}
+            />
+            <DonutChart
+              title={t('dash.quality.title')}
+              description={t('dash.quality.description')}
+              items={issuePieItems}
+              emptyText={t('dash.quality.empty')}
+              totalLabel={t('dash.total')}
+              locale={locale}
+            />
+          </div>
+
+          <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[minmax(0,11fr)_minmax(0,9fr)]">
+            <BarChart
+              title={t('dash.ranking.title')}
+              description={t('dash.ranking.description')}
+              items={scoreBarItems}
+              emptyText={t('dash.ranking.empty')}
+            />
+            <Card>
+              <CardHeader title={t('dash.summary.title')} description={t('dash.summary.description')} />
+              <CardBody className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <SummaryTile
+                  label={t('dash.summary.best')}
+                  value={bestItem?.label || t('dash.summary.noData')}
+                  note={bestItem
+                    ? `${Number(bestItem.avg_score || 0).toFixed(1)} ${t('dash.outOf10')}`
+                    : t('dash.summary.notEnough')}
+                />
+                <SummaryTile
+                  label={t('dash.summary.attention')}
+                  value={attentionItem?.label || t('dash.summary.noProblems')}
+                  note={attentionItem
+                    ? t('dash.summary.problemsCount', { n: attentionItem.problem_records })
+                    : t('dash.summary.stable')}
+                />
+                <SummaryTile
+                  label={t('dash.summary.total')}
+                  value={total.toLocaleString(locale)}
+                  note={t('dash.summary.inSample')}
+                />
+                <SummaryTile
+                  label={t('dash.summary.problems')}
+                  value={problems.toLocaleString(locale)}
+                  note={t('dash.summary.share', { value: formatPercent(problemShare) })}
+                />
+              </CardBody>
+            </Card>
+          </div>
+
+          <footer className="flex min-w-0 flex-wrap items-center justify-between gap-x-6 gap-y-2 border-t border-line pt-4 text-xs text-fg-subtle">
+            <p className="min-w-0">{t('dash.source')}</p>
+            <p className="inline-flex min-w-0 items-center gap-1.5">
+              <Icon name="check-circle" size={16} className="text-success" />
+              {t('dash.sampleNote')}
+            </p>
+          </footer>
+        </>
+      )}
+    </PageStack>
   )
 }

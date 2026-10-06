@@ -1,7 +1,11 @@
 import { useTranslation } from 'react-i18next'
+import { Alert, Card, Field, FormSection, Input, Select } from '../ui'
 
-// Step 1: Basic class info
-export default function Step1Basic({ data, onChange, catalog, catalogLoading = false, catalogError = '' }) {
+// Пустое ли текстовое поле (та же проверка, что в utils/recordForm.js)
+const isEmpty = (value) => !(typeof value === 'string' && value.trim())
+
+// Шаг 1: основная информация о занятии
+export default function Step1Basic({ data, onChange, catalog, catalogLoading = false, catalogError = '', showErrors = false }) {
   const { t } = useTranslation()
   const catalogFaculties = catalog?.faculties ?? []
   const teacherOptions = catalog?.teachers ?? []
@@ -26,9 +30,10 @@ export default function Step1Basic({ data, onChange, catalog, catalogLoading = f
   const field = (name) => ({
     value: data[name] ?? '',
     onChange: (e) => onChange({ [name]: e.target.value }),
-    className: 'input',
-    required: true,
   })
+
+  // Ошибка под полем появляется после неудачной попытки перейти дальше
+  const errorFor = (name) => (showErrors && isEmpty(data[name]) ? t('recordForm.required') : undefined)
 
   const handleFacultyChange = (e) => {
     onChange({ faculty: e.target.value, op: '', group_name: '' })
@@ -43,94 +48,69 @@ export default function Step1Basic({ data, onChange, catalog, catalogLoading = f
   }
 
   return (
-    <div className="space-y-4">
-      <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">{t('steps.basicTitle')}</h2>
+    <div className="flex min-w-0 flex-col gap-6">
+      <h2 className="text-lg font-semibold text-fg">{t('steps.basicTitle')}</h2>
 
-      {catalogLoading && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
-          {t('steps.catalogLoading')}
-        </div>
-      )}
+      {catalogLoading && <Alert tone="info">{t('steps.catalogLoading')}</Alert>}
+      {catalogError && <Alert tone="warning">{catalogError}</Alert>}
 
-      {catalogError && (
-        <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-sm text-yellow-700 dark:border-yellow-900/40 dark:bg-yellow-950/30 dark:text-yellow-300">
-          {catalogError}
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <label className="label">{t('steps.teacher')}</label>
-          <input
-            {...field('teacher')}
-            list="teacher-options"
-            placeholder={t('steps.teacherPlaceholder')}
-          />
+      <Card padded>
+        <FormSection title={t('recordForm.sections.teacherSubject')}>
+          <Field label={t('recordForm.fields.teacher')} required error={errorFor('teacher')}>
+            <Input
+              {...field('teacher')}
+              list="teacher-options"
+              autoComplete="off"
+              placeholder={t('recordForm.fields.teacherPlaceholder')}
+            />
+          </Field>
           <datalist id="teacher-options">
             {teacherOptions.map((teacher) => (
               <option key={teacher.id} value={teacher.full_name} />
             ))}
           </datalist>
-        </div>
-        <div>
-          <label className="label">{t('steps.subject')}</label>
-          <input {...field('subject')} placeholder={t('steps.subjectPlaceholder')} />
-        </div>
-        <div>
-          <label className="label">{t('steps.faculty')}</label>
-          <select
-            value={data.faculty ?? ''}
-            onChange={handleFacultyChange}
-            className="input"
-            required
-          >
-            <option value="">{t('steps.selectFaculty')}</option>
-            {facultyOptions.map((faculty) => (
-              <option key={faculty.id} value={faculty.name_ru}>
-                {faculty.name_ru}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="label">{t('steps.op')}</label>
-          <select
-            value={data.op ?? ''}
-            onChange={handleSpecializationChange}
-            className="input"
-            required
-            disabled={!data.faculty}
-          >
-            <option value="">{data.faculty ? t('steps.selectOp') : t('steps.selectFacultyFirst')}</option>
-            {specializationOptions.map((specialization) => (
-              <option key={specialization.id} value={opValue(specialization)}>
-                {opValue(specialization)}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="label">{t('steps.group')}</label>
-          <select
-            value={data.group_name ?? ''}
-            onChange={handleGroupChange}
-            className="input"
-            required
-            disabled={!data.op}
-          >
-            <option value="">{data.op ? t('steps.selectGroup') : t('steps.selectOpFirst')}</option>
-            {groupOptions.map((group) => (
-              <option key={group.id} value={group.name}>
-                {group.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="label">{t('steps.room')}</label>
-          <input {...field('room')} placeholder={t('steps.roomPlaceholder')} />
-        </div>
-      </div>
+          <Field label={t('recordForm.fields.subject')} required error={errorFor('subject')}>
+            <Input {...field('subject')} placeholder={t('steps.subjectPlaceholder')} />
+          </Field>
+        </FormSection>
+      </Card>
+
+      <Card padded>
+        <FormSection title={t('recordForm.sections.groupRoom')}>
+          <Field label={t('recordForm.fields.faculty')} required error={errorFor('faculty')} className="sm:col-span-2">
+            <Select
+              value={data.faculty ?? ''}
+              onChange={handleFacultyChange}
+              placeholder={t('steps.selectFaculty')}
+              options={facultyOptions.map((faculty) => ({ value: faculty.name_ru, label: faculty.name_ru }))}
+            />
+          </Field>
+          <Field label={t('recordForm.fields.op')} required error={errorFor('op')} className="sm:col-span-2">
+            <Select
+              value={data.op ?? ''}
+              onChange={handleSpecializationChange}
+              disabled={!data.faculty}
+              placeholder={data.faculty ? t('steps.selectOp') : t('steps.selectFacultyFirst')}
+              options={specializationOptions.map((specialization) => ({
+                value: opValue(specialization),
+                label: opValue(specialization),
+              }))}
+            />
+          </Field>
+          <Field label={t('recordForm.fields.group')} required error={errorFor('group_name')}>
+            <Select
+              value={data.group_name ?? ''}
+              onChange={handleGroupChange}
+              disabled={!data.op}
+              placeholder={data.op ? t('steps.selectGroup') : t('steps.selectOpFirst')}
+              options={groupOptions.map((group) => ({ value: group.name, label: group.name }))}
+            />
+          </Field>
+          <Field label={t('recordForm.fields.room')} required error={errorFor('room')}>
+            <Input {...field('room')} placeholder={t('steps.roomPlaceholder')} />
+          </Field>
+        </FormSection>
+      </Card>
     </div>
   )
 }

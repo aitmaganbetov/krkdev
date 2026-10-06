@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import CameraLive from '../components/CameraLive'
 import { useTranslation } from 'react-i18next'
 import {
   captureRoomPhoto,
@@ -11,15 +12,47 @@ import {
   reviewViolation,
   uploadViolationAct,
 } from '../services/api'
-import Spinner from '../components/Spinner'
 import { useAuth } from '../context/AuthContext'
+import {
+  Alert, Badge, Button, Card, CardBody, CardFooter, CardHeader, DataTable, DescriptionList, EmptyState, Field,
+  FilterBar, Icon, Input, LoadingBlock, Modal, PageHeader, PageStack, Pagination, SearchInput, StatCard, Tabs,
+  Textarea, TruncatedText, cn, useUI,
+} from '../components/ui'
 
 const tabs = [
-  { id: 'live', label: 'Онлайн мониторинг' },
-  { id: 'violations', label: 'Нарушения' },
-  { id: 'archive', label: 'Архив' },
-  { id: 'analytics', label: 'Аналитика' },
+  { id: 'live', icon: 'monitor' },
+  { id: 'violations', icon: 'alert' },
+  { id: 'archive', icon: 'inbox' },
+  { id: 'analytics', icon: 'chart' },
 ]
+
+// Значения типов нарушений уходят в API как есть (русские строки) — переводится только подпись.
+const VIOLATION_TYPES = [
+  { value: 'Отсутствие', key: 'absence' },
+  { value: 'Опоздание (>15 мин)', key: 'late' },
+  { value: 'Нарушение методики преподавания', key: 'methodology' },
+  { value: 'Отпускает раньше времени', key: 'earlyRelease' },
+  { value: 'Отсутствовали студенты', key: 'noStudents' },
+  { value: 'Нарушение учебной дисциплины', key: 'studyDiscipline' },
+  { value: 'Несвоевременное заполнение LMS', key: 'lms' },
+  { value: 'Нарушение трудовой дисциплины', key: 'laborDiscipline' },
+  { value: 'Ненадлежащий контроль при экзамене', key: 'examControl' },
+  { value: 'Прочее', key: 'other' },
+]
+const DEFAULT_VIOLATION_TYPE = VIOLATION_TYPES[0].value
+
+// Подпись типа нарушения на текущем языке; неизвестное значение показываем как есть.
+function violationTypeLabel(t, value) {
+  const found = VIOLATION_TYPES.find((item) => item.value === value)
+  return found ? t(`monitoring.types.${found.key}`) : value
+}
+
+// Локаль для дат и времени: 'kz' — код интерфейса, Intl ожидает 'kk'.
+const DATE_LOCALES = { ru: 'ru-RU', kz: 'kk-KZ', en: 'en-GB' }
+const dateLocale = (lang) => DATE_LOCALES[lang] || 'ru-RU'
+
+// Фон области просмотра медиа: тёмный в обеих темах (единственное допустимое исключение из токенов).
+const MEDIA_BG = 'bg-[rgb(6_18_31)]'
 
 function getDemoLessons(date, databaseRecords, configuredRooms) {
   const uniqueTeachers = new Set()
@@ -46,73 +79,26 @@ function getDemoLessons(date, databaseRecords, configuredRooms) {
   }))
 }
 
-function Icon({ name, className = 'w-5 h-5' }) {
-  const paths = {
-    pulse: 'M3 12h4l2-7 4 14 2-7h6',
-    alert: 'M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z',
-    archive: 'M5 8h14M9 12h6m-9 9h12a2 2 0 002-2V8H4v11a2 2 0 002 2zM4 3h16v5H4z',
-    chart: 'M4 19V9m5 10V5m5 14v-7m5 7V3',
-    clock: 'M12 8v4l3 2m6-2a9 9 0 11-18 0 9 9 0 0118 0z',
-    pin: 'M17.657 16.657L13.414 20.9a2 2 0 01-2.828 0l-4.243-4.243a8 8 0 1111.314 0zM15 11a3 3 0 11-6 0 3 3 0 016 0z',
-    book: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5A4.5 4.5 0 003 9.5v9A4.5 4.5 0 017.5 14c1.746 0 3.332.477 4.5 1.253m0-9C13.168 5.477 14.754 5 16.5 5A4.5 4.5 0 0121 9.5v9a4.5 4.5 0 00-4.5-4.5c-1.746 0-3.332.477-4.5 1.253',
-    users: 'M17 20h5v-2a4 4 0 00-5-3.87M17 20H7m10 0v-2a5 5 0 00-10 0v2m10 0H7m0 0H2v-2a4 4 0 015-3.87M15 7a3 3 0 11-6 0 3 3 0 016 0z',
-    search: 'M21 21l-4.35-4.35m2.35-5.65a8 8 0 11-16 0 8 8 0 0116 0z',
-  }
-  return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d={paths[name]} />
-    </svg>
-  )
+// Порог низкого балла задаётся в справочнике учебного года (бэкенд отдаёт is_low_score)
+function isLowScore(record) {
+  return record.is_low_score ?? Number(record.score || 0) < 5
 }
 
-function Metric({ label, value, tone }) {
-  const tones = {
-    indigo: 'border-l-[#163A63] text-[#163A63] dark:text-blue-300',
-    emerald: 'border-l-emerald-600 text-emerald-700 dark:text-emerald-400',
-    rose: 'border-l-rose-600 text-rose-700 dark:text-rose-400',
-    amber: 'border-l-amber-600 text-amber-700 dark:text-amber-400',
-  }
+// Строка «иконка — подпись — значение» в карточке занятия
+function LessonFact({ icon, label, children, className }) {
   return (
-    <div className={`rounded-lg border border-slate-200 border-l-4 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900 ${tones[tone]}`}>
-      <p className="text-sm font-medium text-slate-600 dark:text-slate-300">{label}</p>
-      <p className="mt-2 text-3xl font-bold tracking-tight">{value}</p>
-    </div>
-  )
-}
-
-function Pagination({ total, page, pageSize, onPageChange, onPageSizeChange }) {
-  if (!total) return null
-  const pageCount = Math.max(1, Math.ceil(total / pageSize))
-  const currentPage = Math.min(page, pageCount)
-  const candidates = [1, 2, currentPage - 1, currentPage, currentPage + 1, pageCount - 1, pageCount]
-    .filter((value) => value >= 1 && value <= pageCount)
-  const pages = [...new Set(candidates)].sort((a, b) => a - b)
-
-  return (
-    <div className="mt-5 flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:flex-row sm:items-center sm:justify-between">
-      <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">Всего записей: {total}</p>
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className="min-h-11 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800" disabled={currentPage === 1} onClick={() => onPageChange(currentPage - 1)}>Назад</button>
-        {pages.map((value, index) => (
-          <span key={value} className="contents">
-            {index > 0 && value - pages[index - 1] > 1 && <span className="px-1 text-slate-400">…</span>}
-            <button type="button" onClick={() => onPageChange(value)} className={`min-h-11 min-w-11 rounded-lg px-3 text-xs font-semibold transition-colors ${value === currentPage ? 'bg-blue-700 text-white shadow-sm' : 'border border-slate-300 bg-white text-slate-700 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'}`}>{value}</button>
-          </span>
-        ))}
-        <button type="button" className="min-h-11 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800" disabled={currentPage === pageCount} onClick={() => onPageChange(currentPage + 1)}>Вперёд</button>
-        <span className="ml-1 text-xs text-slate-400">Страница {currentPage} из {pageCount}</span>
-        <label className="ml-auto flex items-center gap-2 text-xs text-slate-500">
-          На странице:
-          <select className="min-h-11 rounded-lg border border-slate-300 bg-white px-2 py-2 font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200" value={pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))}>
-            {[10, 20, 50, 100].map((size) => <option key={size} value={size}>{size}</option>)}
-          </select>
-        </label>
+    <div className={cn('flex min-w-0 items-start gap-2.5', className)}>
+      <Icon name={icon} size={16} className="mt-0.5 text-fg-subtle" />
+      <div className="min-w-0">
+        <p className="text-xs text-fg-subtle">{label}</p>
+        <div className="min-w-0 text-sm font-medium text-fg">{children}</div>
       </div>
     </div>
   )
 }
 
 function LessonCard({ record, onOpen }) {
+  const { t, i18n } = useTranslation()
   const date = new Date(record.datetime)
   const initials = String(record.teacher || '?')
     .split(/\s+/)
@@ -120,155 +106,236 @@ function LessonCard({ record, onOpen }) {
     .map((part) => part[0])
     .join('')
     .toUpperCase()
-  const isProblem = Number(record.score || 0) < 5
+  const isProblem = isLowScore(record)
 
   return (
-    <article className="group relative overflow-hidden rounded-lg border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md dark:border-slate-700 dark:bg-slate-900">
-      <div className={`absolute inset-x-0 top-0 h-1 ${isProblem ? 'bg-rose-600' : 'bg-blue-700'}`} />
-      <div className="flex items-start gap-3">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-sm font-bold text-blue-800 dark:bg-blue-950/40 dark:text-blue-300">
+    <Card as="article" className={cn('flex flex-col gap-4 p-4 sm:p-5', isProblem && 'border-danger/40')}>
+      <div className="flex min-w-0 items-start gap-3">
+        <span aria-hidden="true" className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary-subtle text-sm font-semibold text-primary-subtle-fg">
           {initials}
-        </div>
-        <div className="min-w-0 flex-1">
-          <h3 className="line-clamp-2 font-bold leading-snug text-slate-900 dark:text-white">{record.teacher}</h3>
-          <p className="mt-1 truncate text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">{record.faculty}</p>
-        </div>
-        <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider ${isProblem ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'}`}>
-          {isProblem ? 'Риск' : 'Активно'}
         </span>
-      </div>
-
-      <div className="my-5 grid gap-3 text-sm">
-        <div className="flex items-start gap-3">
-          <Icon name="clock" className="mt-0.5 h-4 w-4 text-blue-700" />
-          <div><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Время</p><p className="font-bold text-slate-800 dark:text-slate-100">{date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</p></div>
-        </div>
-        <div className="flex items-start gap-3">
-          <Icon name="pin" className="mt-0.5 h-4 w-4 text-blue-700" />
-          <div><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Аудитория</p><p className="font-semibold text-slate-700 dark:text-slate-200">{record.room || '—'}</p></div>
-        </div>
-        <div className="flex items-start gap-3">
-          <Icon name="book" className="mt-0.5 h-4 w-4 text-blue-700" />
-          <div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Дисциплина</p><p className="line-clamp-2 font-semibold text-slate-700 dark:text-slate-200">{record.subject}</p></div>
-        </div>
-        <div className="flex items-start gap-3">
-          <Icon name="users" className="mt-0.5 h-4 w-4 text-blue-700" />
-          <div><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Посещаемость</p><p className="font-semibold text-slate-700 dark:text-slate-200">{Number(record.attendance || 0).toFixed(0)}% · {record.group_name}</p></div>
+        {/* Статус под ФИО, чтобы не отнимать у него ширину */}
+        <div className="min-w-0 flex-1">
+          <h3 className="break-words text-base font-semibold text-fg" title={record.teacher}>{record.teacher}</h3>
+          {record.faculty && <TruncatedText lines={2} className="mt-0.5 text-xs text-fg-muted">{record.faculty}</TruncatedText>}
+          <Badge tone={isProblem ? 'danger' : 'success'} dot className="mt-2">
+            {isProblem ? t('monitoring.lesson.risk') : t('monitoring.lesson.active')}
+          </Badge>
         </div>
       </div>
 
-      <button onClick={() => onOpen(record)} className="btn-primary w-full">
-        Зафиксировать нарушение
-      </button>
-    </article>
+      <div className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-3">
+        <LessonFact icon="clock" label={t('monitoring.lesson.time')}>
+          <span className="tabular">{date.toLocaleTimeString(dateLocale(i18n.language), { hour: '2-digit', minute: '2-digit' })}</span>
+        </LessonFact>
+        <LessonFact icon="pin" label={t('monitoring.lesson.room')}>
+          <span className="break-words">{record.room || '—'}</span>
+        </LessonFact>
+        <LessonFact icon="book" label={t('monitoring.lesson.subject')} className="col-span-2">
+          <TruncatedText lines={2}>{record.subject}</TruncatedText>
+        </LessonFact>
+        <LessonFact icon="users" label={t('monitoring.lesson.attendance')} className="col-span-2">
+          <span className="break-words"><span className="tabular">{Number(record.attendance || 0).toFixed(0)}%</span> · {record.group_name}</span>
+        </LessonFact>
+      </div>
+
+      <Button block icon="alert" className="mt-auto" onClick={() => onOpen(record)}>
+        {t('monitoring.lesson.report')}
+      </Button>
+    </Card>
   )
 }
 
-function ViolationsReview({ items, role, onReview, onUploadAct, uploadingActId }) {
+// Кнопка загрузки АКТа: скрытый file input + обычная кнопка (доступна с клавиатуры)
+function ActUploadButton({ item, uploading, onUploadAct }) {
+  const { t } = useTranslation()
+  const inputRef = useRef(null)
+  return (
+    <>
+      <input ref={inputRef} type="file" accept="application/pdf,.pdf" className="hidden" disabled={uploading}
+        onChange={(event) => { const file = event.target.files?.[0]; if (file) onUploadAct(item.id, file); event.target.value = '' }} />
+      <Button variant="secondary" icon="upload" loading={uploading} onClick={() => inputRef.current?.click()}>
+        {uploading ? t('monitoring.review.uploadingAct') : item.act_url ? t('monitoring.review.replaceAct') : t('monitoring.review.attachAct')}
+      </Button>
+    </>
+  )
+}
+
+// Миниатюра доказательства: медиа сверху, подпись снизу (без текста поверх изображения)
+function EvidenceThumb({ media, onOpen }) {
+  const { t } = useTranslation()
+  const isPhoto = media.media_type === 'photo'
+  return (
+    <button type="button" onClick={onOpen}
+      className="group flex w-56 shrink-0 snap-start flex-col overflow-hidden rounded-md border border-line bg-surface text-left transition-colors hover:border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+      <span className={cn('block aspect-video w-full overflow-hidden', MEDIA_BG)}>
+        {isPhoto
+          ? <img src={media.url} alt={t('monitoring.review.evidenceAlt')} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+          : <video muted preload="metadata" className="h-full w-full object-cover"><source src={media.url} type="video/mp4" /></video>}
+      </span>
+      <span className="flex min-w-0 items-center gap-2 px-3 py-2 text-sm font-medium text-fg-muted group-hover:text-fg">
+        <Icon name={isPhoto ? 'image' : 'video'} size={16} />
+        <span className="min-w-0">{isPhoto ? t('monitoring.review.openPhoto') : t('monitoring.review.openVideo')}</span>
+      </span>
+    </button>
+  )
+}
+
+const STATUS_TONE = { pending: 'warning', confirmed: 'success', rejected: 'danger' }
+
+function ViolationsReview({ items, role, onReview, onUploadAct, uploadingActId, loading, error, onRetry }) {
+  const { t, i18n } = useTranslation()
   const [previewImage, setPreviewImage] = useState('')
   const [previewVideo, setPreviewVideo] = useState('')
   const [previewZoom, setPreviewZoom] = useState(1)
 
+  if (loading && !items.length) {
+    return <Card><LoadingBlock label={t('monitoring.review.loading')} /></Card>
+  }
+  if (error && !items.length) {
+    return (
+      <Alert tone="danger" title={error}
+        action={<Button variant="secondary" size="sm" icon="refresh" onClick={onRetry}>{t('ui.retry')}</Button>} />
+    )
+  }
   if (!items.length) {
-    return <div className="rounded-lg border border-dashed border-slate-300 bg-white py-16 text-center text-slate-400 shadow-sm dark:border-slate-700 dark:bg-slate-900">Зафиксированных нарушений пока нет</div>
+    return (
+      <Card>
+        <EmptyState icon="check-circle" title={t('monitoring.review.empty')} description={t('monitoring.review.emptyHint')} />
+      </Card>
+    )
   }
-  const statusInfo = {
-    pending: ['Ожидает проверки', 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'],
-    confirmed: ['Подтверждено', 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'],
-    rejected: ['Отклонено', 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'],
-  }
+
   return (
-    <div className="space-y-4">
+    <div className="flex min-w-0 flex-col gap-4">
       {items.map((item) => {
-        const [statusLabel, statusClass] = statusInfo[item.status] || statusInfo.pending
+        const status = STATUS_TONE[item.status] ? item.status : 'pending'
         return (
-          <article key={item.id} className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-            <div className="grid gap-5 p-5 lg:grid-cols-[1fr_.9fr]">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div><p className="text-xs font-bold uppercase tracking-[0.14em] text-blue-700">{item.violation_type}</p><h3 className="mt-1 text-lg font-bold text-slate-900 dark:text-white">{item.teacher}</h3></div>
-                  <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusClass}`}>{statusLabel}</span>
+          <Card as="article" key={item.id}>
+            <div className="grid min-w-0 gap-5 p-4 sm:p-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
+              <div className="flex min-w-0 flex-col gap-4">
+                <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-3 gap-y-2">
+                  <div className="min-w-0 flex-1 basis-56">
+                    <p className="break-words text-sm font-medium text-accent">{violationTypeLabel(t, item.violation_type)}</p>
+                    <h3 className="mt-0.5 break-words text-lg font-semibold text-fg">{item.teacher}</h3>
+                  </div>
+                  <Badge tone={STATUS_TONE[status]} dot>{t(`monitoring.review.status.${status}`)}</Badge>
                 </div>
-                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                  <div><p className="text-xs font-bold uppercase text-slate-400">Аудитория</p><p className="font-semibold dark:text-slate-200">{item.room || '—'}</p></div>
-                  <div><p className="text-xs font-bold uppercase text-slate-400">Дата</p><p className="font-semibold dark:text-slate-200">{new Date(`${item.violation_date}T00:00:00`).toLocaleDateString('ru-RU')}</p></div>
-                  <div className="col-span-2"><p className="text-xs font-bold uppercase text-slate-400">Дисциплина</p><p className="font-semibold dark:text-slate-200">{item.subject || '—'}</p></div>
+                <DescriptionList items={[
+                  { label: t('monitoring.review.room'), value: item.room || '—' },
+                  { label: t('monitoring.review.date'), value: <span className="tabular">{new Date(`${item.violation_date}T00:00:00`).toLocaleDateString(dateLocale(i18n.language))}</span> },
+                  { label: t('monitoring.review.subject'), value: item.subject || '—', full: true },
+                ]} />
+                {item.description && <p className="whitespace-pre-line rounded-md bg-surface-muted p-3 text-sm text-fg-muted">{item.description}</p>}
+                <div className="flex min-w-0 flex-col gap-1 text-xs text-fg-subtle">
+                  <p className="break-words">{t('monitoring.review.createdBy', { name: item.created_by })}</p>
+                  {item.reviewed_by && (
+                    <p className="break-words">
+                      {t('monitoring.review.reviewedBy', { name: item.reviewed_by })}{item.review_comment ? ` · ${item.review_comment}` : ''}
+                    </p>
+                  )}
                 </div>
-                {item.description && <p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm text-slate-600 dark:bg-slate-800 dark:text-slate-300">{item.description}</p>}
-                <p className="mt-3 text-xs text-slate-400">Зафиксировал: {item.created_by}</p>
-                {item.reviewed_by && <p className="mt-1 text-xs text-slate-400">Проверил: {item.reviewed_by}{item.review_comment ? ` · ${item.review_comment}` : ''}</p>}
-                {item.act_url && <a href={item.act_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">Открыть прикреплённый АКТ</a>}
+                {item.act_url && (
+                  <div className="flex flex-wrap gap-2">
+                    <Button as="a" href={item.act_url} target="_blank" rel="noreferrer" variant="secondary" size="sm" icon="file-text">
+                      {t('monitoring.review.openAct')}
+                    </Button>
+                  </div>
+                )}
               </div>
-              <div className="min-w-0">
-                <p className="mb-2 text-xs font-black uppercase tracking-[0.14em] text-slate-400">Фото и видео доказательства</p>
+              <div className="flex min-w-0 flex-col gap-2">
+                <p className="text-sm font-medium text-fg">{t('monitoring.review.evidence')}</p>
                 {item.evidence?.length ? (
-                  <div className="flex w-full snap-x snap-mandatory gap-3 overflow-x-auto pb-3">
+                  <div className="scrollbar-thin flex min-w-0 snap-x snap-mandatory gap-3 overflow-x-auto pb-2">
                     {item.evidence.map((media) => (
-                      media.media_type === 'photo'
-                        ? <button key={media.id} type="button" onClick={() => { setPreviewImage(media.url); setPreviewZoom(1) }} className="group relative w-[220px] shrink-0 snap-start overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900"><img src={media.url} alt="Доказательство" className="aspect-video w-full object-cover transition-transform duration-300 group-hover:scale-105" /><span className="absolute inset-0 flex items-center justify-center bg-slate-950/0 text-sm font-semibold text-white opacity-0 transition-all group-hover:bg-slate-950/30 group-hover:opacity-100">Открыть фото</span></button>
-                        : <button key={media.id} type="button" onClick={() => setPreviewVideo(media.url)} className="group relative w-[220px] shrink-0 snap-start overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900"><video muted preload="metadata" className="h-full w-full object-cover"><source src={media.url} type="video/mp4" /></video><span className="absolute inset-0 flex items-center justify-center bg-slate-950/15 text-sm font-semibold text-white transition-colors group-hover:bg-slate-950/35">Открыть видео</span></button>
+                      <EvidenceThumb key={media.id} media={media}
+                        onOpen={() => {
+                          if (media.media_type === 'photo') { setPreviewImage(media.url); setPreviewZoom(1) } else setPreviewVideo(media.url)
+                        }} />
                     ))}
                   </div>
-                ) : <div className="rounded-lg border border-dashed border-slate-300 py-8 text-center text-xs text-slate-400 dark:border-slate-700">Медиа не приложено</div>}
+                ) : (
+                  <div className="rounded-md border border-dashed border-line px-4 py-8 text-center text-sm text-fg-subtle">
+                    {t('monitoring.review.noMedia')}
+                  </div>
+                )}
               </div>
             </div>
             {role === 'admin' && item.status === 'pending' && (
-              <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 px-5 py-3 dark:border-slate-800">
-                <label className="btn-secondary cursor-pointer">
-                  {uploadingActId === item.id ? 'Загрузка АКТа...' : item.act_url ? 'Заменить АКТ (PDF)' : 'Прикрепить АКТ (PDF)'}
-                  <input type="file" accept="application/pdf,.pdf" className="hidden" disabled={uploadingActId === item.id} onChange={(event) => { const file = event.target.files?.[0]; if (file) onUploadAct(item.id, file); event.target.value = '' }} />
-                </label>
-                <button className="btn-danger" onClick={() => onReview(item.id, 'rejected')}>Отклонить</button>
-                <button className="btn-success" disabled={!item.act_url} title={!item.act_url ? 'Сначала прикрепите АКТ в формате PDF' : undefined} onClick={() => onReview(item.id, 'confirmed')}>Подтвердить нарушение</button>
-              </div>
+              <CardFooter>
+                {!item.act_url && <p className="min-w-0 flex-1 basis-56 text-xs text-fg-subtle">{t('monitoring.review.actRequired')}</p>}
+                <ActUploadButton item={item} uploading={uploadingActId === item.id} onUploadAct={onUploadAct} />
+                <Button variant="danger" icon="x" onClick={() => onReview(item.id, 'rejected')}>{t('monitoring.review.reject')}</Button>
+                <Button variant="success" icon="check" disabled={!item.act_url}
+                  title={!item.act_url ? t('monitoring.review.actRequired') : undefined}
+                  onClick={() => onReview(item.id, 'confirmed')}>
+                  {t('monitoring.review.confirm')}
+                </Button>
+              </CardFooter>
             )}
-          </article>
+          </Card>
         )
       })}
-      {previewImage && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/70 p-3 backdrop-blur-sm sm:p-6">
-          <div className="flex h-full w-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
-              <p className="font-semibold text-slate-900 dark:text-white">Просмотр фотодоказательства</p>
-              <div className="flex items-center gap-2">
-                <button type="button" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800" onClick={() => setPreviewZoom((value) => Math.max(0.5, value - 0.25))}>−</button>
-                <button type="button" className="min-w-16 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800" onClick={() => setPreviewZoom(1)}>{Math.round(previewZoom * 100)}%</button>
-                <button type="button" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800" onClick={() => setPreviewZoom((value) => Math.min(4, value + 0.25))}>+</button>
-                <button type="button" className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800" onClick={() => setPreviewImage('')}>Закрыть</button>
-              </div>
+
+      {/* Просмотр фото: масштаб 50–400%, при увеличении область прокручивается */}
+      <Modal
+        open={!!previewImage}
+        onClose={() => setPreviewImage('')}
+        size="full"
+        title={t('monitoring.preview.photoTitle')}
+        className="sm:!h-[90vh]"
+        bodyClassName={cn('!p-0 !overflow-auto', MEDIA_BG)}
+        footer={(
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="secondary" icon="minus" iconOnly aria-label={t('monitoring.preview.zoomOut')}
+                onClick={() => setPreviewZoom((value) => Math.max(0.5, value - 0.25))} />
+              <Button variant="secondary" className="min-w-16 tabular" title={t('monitoring.preview.zoomReset')}
+                aria-label={t('monitoring.preview.zoomReset')} onClick={() => setPreviewZoom(1)}>
+                {Math.round(previewZoom * 100)}%
+              </Button>
+              <Button variant="secondary" icon="plus" iconOnly aria-label={t('monitoring.preview.zoomIn')}
+                onClick={() => setPreviewZoom((value) => Math.min(4, value + 0.25))} />
             </div>
-            <div className={`flex min-h-0 flex-1 overflow-auto bg-slate-50 p-4 dark:bg-slate-950 ${previewZoom > 1 ? 'items-start justify-start' : 'items-center justify-center'}`}>
-              <img src={previewImage} alt="Увеличенное фотодоказательство" className="max-w-none shrink-0 select-none object-contain transition-[width] duration-200" style={{ width: `${previewZoom * 100}%`, maxHeight: previewZoom <= 1 ? '100%' : 'none' }} />
-            </div>
-          </div>
+            <Button onClick={() => setPreviewImage('')}>{t('ui.close')}</Button>
+          </>
+        )}
+      >
+        <div className={cn('flex h-full min-h-full w-full p-4', previewZoom > 1 ? 'items-start justify-start' : 'items-center justify-center')}>
+          <img src={previewImage} alt={t('monitoring.preview.photoAlt')}
+            className="max-w-none shrink-0 select-none object-contain transition-[width] duration-200"
+            style={{ width: `${previewZoom * 100}%`, maxHeight: previewZoom <= 1 ? '100%' : 'none' }} />
         </div>
-      )}
-      {previewVideo && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/70 p-3 backdrop-blur-sm sm:p-6">
-          <div className="flex h-full w-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-            <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
-              <p className="font-semibold text-slate-900 dark:text-white">Просмотр видеодоказательства</p>
-              <button type="button" className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800" onClick={() => setPreviewVideo('')}>Закрыть</button>
-            </div>
-            <div className="flex min-h-0 flex-1 items-center justify-center bg-slate-50 p-4 dark:bg-slate-950">
-              <video key={previewVideo} controls autoPlay playsInline className="max-h-full max-w-full rounded-lg border border-slate-200 bg-black shadow-sm dark:border-slate-700">
-                <source src={previewVideo} type="video/mp4" />
-                Ваш браузер не поддерживает просмотр видео.
-              </video>
-            </div>
-          </div>
-        </div>
-      )}
+      </Modal>
+
+      {/* Просмотр видео */}
+      <Modal
+        open={!!previewVideo}
+        onClose={() => setPreviewVideo('')}
+        size="full"
+        title={t('monitoring.preview.videoTitle')}
+        className="sm:!h-[90vh]"
+        bodyClassName={cn('!p-0 flex items-center justify-center', MEDIA_BG)}
+        footer={<Button onClick={() => setPreviewVideo('')}>{t('ui.close')}</Button>}
+      >
+        <video key={previewVideo} controls autoPlay playsInline className="max-h-full max-w-full">
+          <source src={previewVideo} type="video/mp4" />
+          {t('monitoring.preview.videoUnsupported')}
+        </video>
+      </Modal>
     </div>
   )
 }
 
 export default function MonitoringPage() {
-  const { i18n } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const { toast } = useUI()
   const { role } = useAuth()
   const [records, setRecords] = useState([])
   const [rooms, setRooms] = useState([])
   const [violations, setViolations] = useState([])
+  const [violationsLoading, setViolationsLoading] = useState(true)
+  const [violationsError, setViolationsError] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [tab, setTab] = useState('live')
@@ -276,11 +343,12 @@ export default function MonitoringPage() {
   const [teacher, setTeacher] = useState('')
   const [room, setRoom] = useState('')
   const [selectedLesson, setSelectedLesson] = useState(null)
-  const [violationType, setViolationType] = useState('Отсутствие')
+  const [violationType, setViolationType] = useState(DEFAULT_VIOLATION_TYPE)
   const [violationDate, setViolationDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [violationDescription, setViolationDescription] = useState('')
   const [savingViolation, setSavingViolation] = useState(false)
-  const [violationNotice, setViolationNotice] = useState('')
+  // Сообщение внутри формы фиксации: { tone, text }
+  const [violationNotice, setViolationNotice] = useState(null)
   const [evidence, setEvidence] = useState([])
   const [capturing, setCapturing] = useState('')
   const [videoExpanded, setVideoExpanded] = useState(false)
@@ -288,8 +356,14 @@ export default function MonitoringPage() {
   const [improvingText, setImprovingText] = useState(false)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
+  // Диалог проверки нарушения (комментарий администратора): { id, status }
+  const [reviewTarget, setReviewTarget] = useState(null)
+  const [reviewComment, setReviewComment] = useState('')
+  const [reviewing, setReviewing] = useState(false)
 
-  useEffect(() => {
+  const loadRecords = () => {
+    setLoading(true)
+    setError('')
     getRecords({ skip: 0, limit: 200 })
       .then(async (data) => {
         const firstItems = data.items || []
@@ -300,16 +374,22 @@ export default function MonitoringPage() {
         const remaining = await Promise.all(remainingRequests)
         setRecords([...firstItems, ...remaining.flatMap((result) => result.items || [])])
       })
-      .catch(() => setError('Не удалось загрузить данные мониторинга'))
+      .catch(() => setError(t('monitoring.loadError')))
       .finally(() => setLoading(false))
-  }, [])
+  }
+
+  useEffect(() => { loadRecords() }, [])
 
   useEffect(() => {
     getRooms().then((data) => setRooms(data || [])).catch(() => setRooms([]))
   }, [])
 
   const loadViolations = () => {
-    getViolations().then((data) => setViolations(data || [])).catch(() => setViolations([]))
+    setViolationsLoading(true)
+    getViolations()
+      .then((data) => { setViolations(data || []); setViolationsError('') })
+      .catch(() => { setViolations([]); setViolationsError(t('monitoring.review.loadError')) })
+      .finally(() => setViolationsLoading(false))
   }
 
   useEffect(() => loadViolations(), [])
@@ -325,10 +405,10 @@ export default function MonitoringPage() {
 
   const openViolation = (lesson) => {
     setSelectedLesson(lesson)
-    setViolationType('Отсутствие')
+    setViolationType(DEFAULT_VIOLATION_TYPE)
     setViolationDate(String(lesson.datetime || date).slice(0, 10))
     setViolationDescription('')
-    setViolationNotice('')
+    setViolationNotice(null)
     setEvidence([])
     setVideoExpanded(false)
   }
@@ -336,14 +416,17 @@ export default function MonitoringPage() {
   const captureEvidence = async (kind) => {
     if (!selectedCameraRoom) return
     setCapturing(kind)
-    setViolationNotice('')
+    setViolationNotice(null)
     try {
       const item = kind === 'photo'
         ? await captureRoomPhoto(selectedCameraRoom.id)
         : await recordRoomVideo(selectedCameraRoom.id, 10)
       setEvidence((current) => [...current, item])
     } catch (err) {
-      setViolationNotice(err.response?.data?.detail || `Не удалось ${kind === 'photo' ? 'сделать снимок' : 'записать видео'}`)
+      setViolationNotice({
+        tone: 'danger',
+        text: err.response?.data?.detail || t(kind === 'photo' ? 'monitoring.form.photoError' : 'monitoring.form.videoError'),
+      })
     } finally {
       setCapturing('')
     }
@@ -351,17 +434,20 @@ export default function MonitoringPage() {
 
   const improveDescription = async () => {
     if (violationDescription.trim().length < 3) {
-      setViolationNotice('Сначала введите краткое описание ситуации')
+      setViolationNotice({ tone: 'warning', text: t('monitoring.form.needDescription') })
       return
     }
     setImprovingText(true)
-    setViolationNotice('')
+    setViolationNotice(null)
     try {
       const result = await improveViolationText(violationDescription.trim())
       setViolationDescription(result.text)
-      setViolationNotice(`Текст улучшен с помощью ${result.provider === 'openai' ? 'OpenAI' : 'Gemini'}`)
+      setViolationNotice({
+        tone: 'success',
+        text: t('monitoring.form.aiImproved', { provider: result.provider === 'openai' ? 'OpenAI' : 'Gemini' }),
+      })
     } catch (err) {
-      setViolationNotice(err.response?.data?.detail || 'Не удалось улучшить текст с помощью AI')
+      setViolationNotice({ tone: 'danger', text: err.response?.data?.detail || t('monitoring.form.aiError') })
     } finally {
       setImprovingText(false)
     }
@@ -371,7 +457,7 @@ export default function MonitoringPage() {
     event.preventDefault()
     if (!selectedLesson || !violationType) return
     setSavingViolation(true)
-    setViolationNotice('')
+    setViolationNotice(null)
     try {
       await createViolation({
         lesson_ref: String(selectedLesson.id),
@@ -384,39 +470,50 @@ export default function MonitoringPage() {
         evidence_ids: evidence.map((item) => item.id),
       })
       setSelectedLesson(null)
-      setViolationNotice('Нарушение успешно зафиксировано')
+      toast.success(t('monitoring.form.saved'))
       loadViolations()
       setTab('violations')
     } catch (err) {
-      setViolationNotice(err.response?.data?.detail || 'Не удалось сохранить нарушение')
+      setViolationNotice({ tone: 'danger', text: err.response?.data?.detail || t('monitoring.form.saveError') })
     } finally {
       setSavingViolation(false)
     }
   }
 
-  const handleReview = async (violationId, status) => {
-    const comment = window.prompt(status === 'confirmed' ? 'Комментарий администратора (необязательно)' : 'Причина отклонения (необязательно)') ?? ''
+  // Вместо window.prompt — диалог с необязательным комментарием
+  const handleReview = (violationId, status) => {
+    setReviewComment('')
+    setReviewTarget({ id: violationId, status })
+  }
+
+  const submitReview = async (event) => {
+    event.preventDefault()
+    if (!reviewTarget) return
+    setReviewing(true)
     try {
-      await reviewViolation(violationId, status, comment)
+      await reviewViolation(reviewTarget.id, reviewTarget.status, reviewComment)
+      toast.success(t(reviewTarget.status === 'confirmed' ? 'monitoring.review.confirmed' : 'monitoring.review.rejected'))
+      setReviewTarget(null)
       loadViolations()
     } catch (err) {
-      setViolationNotice(err.response?.data?.detail || 'Не удалось проверить нарушение')
+      toast.error(err.response?.data?.detail || t('monitoring.review.reviewError'))
+    } finally {
+      setReviewing(false)
     }
   }
 
   const handleUploadAct = async (violationId, file) => {
     if (!file.name.toLowerCase().endsWith('.pdf') || (file.type && file.type !== 'application/pdf')) {
-      setViolationNotice('Для АКТа можно выбрать только PDF-файл')
+      toast.error(t('monitoring.review.actPdfOnly'))
       return
     }
     setUploadingActId(violationId)
-    setViolationNotice('')
     try {
       await uploadViolationAct(violationId, file)
-      setViolationNotice('АКТ успешно прикреплён')
+      toast.success(t('monitoring.review.actUploaded'))
       loadViolations()
     } catch (err) {
-      setViolationNotice(err.response?.data?.detail || 'Не удалось загрузить АКТ')
+      toast.error(err.response?.data?.detail || t('monitoring.review.actUploadError'))
     } finally {
       setUploadingActId(null)
     }
@@ -429,7 +526,7 @@ export default function MonitoringPage() {
     return recordsWithDemo.filter((record) => {
       const recordDate = String(record.datetime || '').slice(0, 10)
       const matchesDate = tab === 'archive' || tab === 'analytics' || recordDate === date
-      const matchesTab = tab !== 'violations' || Number(record.score || 0) < 5
+      const matchesTab = tab !== 'violations' || isLowScore(record)
       return matchesDate && matchesTab
         && String(record.teacher || '').toLowerCase().includes(queryTeacher)
         && String(record.room || '').toLowerCase().includes(queryRoom)
@@ -454,7 +551,7 @@ export default function MonitoringPage() {
     setPage(1)
   }, [tab, date, teacher, room, pageSize])
 
-  const problemCount = filtered.filter((record) => Number(record.score || 0) < 5).length
+  const problemCount = filtered.filter((record) => isLowScore(record)).length
   const avgAttendance = filtered.length
     ? filtered.reduce((sum, record) => sum + Number(record.attendance || 0), 0) / filtered.length
     : 0
@@ -462,207 +559,307 @@ export default function MonitoringPage() {
     ? filtered.reduce((sum, record) => sum + Number(record.score || 0), 0) / filtered.length
     : 0
 
+  const tabItems = tabs.map((item) => ({ value: item.id, icon: item.icon, label: t(`monitoring.tabs.${item.id}`) }))
+
+  const analyticsColumns = [
+    { key: 'teacher', header: t('monitoring.analytics.colTeacher'), mobile: 'title', minWidth: '12rem',
+      cell: (record) => <span className="font-medium">{record.teacher}</span> },
+    { key: 'subject', header: t('monitoring.analytics.colSubject'), minWidth: '14rem',
+      cell: (record) => <span className="text-fg-muted">{record.subject}</span> },
+    { key: 'room', header: t('monitoring.analytics.colRoom'), cell: (record) => <span className="text-fg-muted">{record.room || '—'}</span> },
+    { key: 'score', header: t('monitoring.analytics.colScore'), align: 'right', nowrap: true,
+      cell: (record) => (
+        <span className={cn('font-semibold tabular', isLowScore(record) ? 'text-danger' : 'text-success')}>
+          {Number(record.score || 0).toFixed(1)}
+        </span>
+      ) },
+    { key: 'attendance', header: t('monitoring.analytics.colAttendance'), align: 'right', nowrap: true,
+      cell: (record) => <span className="tabular text-fg-muted">{Number(record.attendance || 0).toFixed(0)}%</span> },
+  ]
+
+  const listTitle = tab === 'violations'
+    ? t('monitoring.list.violations')
+    : tab === 'archive' ? t('monitoring.list.archive') : t('monitoring.list.live')
+
+  const reviewConfirming = reviewTarget?.status === 'confirmed'
+
   return (
-    <div className="cyber-screen relative min-h-full overflow-hidden rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-6">
-      <div className="relative space-y-5">
-        <header className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
-          <div className="max-w-3xl">
-            <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-cyan-700 dark:text-cyan-300">
-              <Icon name="pulse" className="h-4 w-4" />
-              KRK // Monitoring Center
-            </div>
-            <h1 className="text-3xl font-bold leading-tight tracking-tight text-slate-950 dark:text-white sm:text-4xl">
-              Ситуационный мониторинг
-            </h1>
-            <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">Видеоконтроль аудиторий, фиксация инцидентов и проверка доказательств</p>
-          </div>
+    <PageStack>
+      <PageHeader title={t('monitoring.title')} description={t('monitoring.description')} />
 
-          <div className="flex max-w-full gap-1 overflow-x-auto rounded-lg border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-            {tabs.map((item) => {
-              const icon = item.id === 'live' ? 'pulse' : item.id === 'violations' ? 'alert' : item.id === 'archive' ? 'archive' : 'chart'
-              return (
-                <button key={item.id} onClick={() => setTab(item.id)} className={`flex min-h-11 shrink-0 items-center gap-2 rounded-lg px-4 py-2.5 text-xs font-semibold uppercase tracking-wide transition-colors ${tab === item.id ? 'bg-blue-700 text-white shadow-sm' : 'text-slate-500 hover:bg-blue-50 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100'}`}>
-                  <Icon name={icon} className="h-4 w-4" />{item.label}
-                </button>
-              )
-            })}
-          </div>
-        </header>
+      <Tabs items={tabItems} value={tab} onChange={setTab} ariaLabel={t('monitoring.tabs.label')} />
 
-        <section className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 md:grid-cols-[190px_1fr_1fr]">
-          <label>
-            <span className="mb-2 block text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400">Дата мониторинга</span>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="input h-12 rounded-lg border-slate-300 bg-white font-semibold dark:border-slate-700 dark:bg-slate-900" />
-          </label>
-          <label>
-            <span className="mb-2 block text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400">Аудитория</span>
-            <div className="relative"><Icon name="search" className="absolute left-4 top-3.5 h-5 w-5 text-slate-400" /><input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Поиск по аудитории..." className="input h-12 rounded-lg border-slate-300 bg-white pl-12 dark:border-slate-700 dark:bg-slate-900" /></div>
-          </label>
-          <label>
-            <span className="mb-2 block text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400">Преподаватель</span>
-            <div className="relative"><Icon name="search" className="absolute left-4 top-3.5 h-5 w-5 text-slate-400" /><input value={teacher} onChange={(e) => setTeacher(e.target.value)} placeholder="Поиск по фамилии..." className="input h-12 rounded-lg border-slate-300 bg-white pl-12 dark:border-slate-700 dark:bg-slate-900" /></div>
-          </label>
-        </section>
+      <FilterBar>
+        <Field label={t('monitoring.filters.date')}>
+          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </Field>
+        <Field label={t('monitoring.filters.room')}>
+          <SearchInput value={room} onChange={(e) => setRoom(e.target.value)} placeholder={t('monitoring.filters.roomPlaceholder')} />
+        </Field>
+        <Field label={t('monitoring.filters.teacher')}>
+          <SearchInput value={teacher} onChange={(e) => setTeacher(e.target.value)} placeholder={t('monitoring.filters.teacherPlaceholder')} />
+        </Field>
+      </FilterBar>
 
-        <section className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-          <Metric label="Занятий" value={filtered.length} tone="indigo" />
-          <Metric label="Средний балл" value={avgScore.toFixed(1)} tone="emerald" />
-          <Metric label="Посещаемость" value={`${avgAttendance.toFixed(0)}%`} tone="amber" />
-          <Metric label="Нарушений" value={problemCount} tone="rose" />
-        </section>
+      <section className="grid min-w-0 grid-cols-2 gap-4 xl:grid-cols-4">
+        <StatCard label={t('monitoring.metrics.lessons')} value={filtered.length} tone="primary" />
+        <StatCard label={t('monitoring.metrics.avgScore')} value={avgScore.toFixed(1)} tone="success" />
+        <StatCard label={t('monitoring.metrics.attendance')} value={`${avgAttendance.toFixed(0)}%`} tone="warning" />
+        <StatCard label={t('monitoring.metrics.violations')} value={problemCount} tone="danger" />
+      </section>
 
-        {violationNotice && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">{violationNotice}</div>}
-
-        {tab === 'violations' ? (
-          <ViolationsReview items={paginatedItems} role={role} onReview={handleReview} onUploadAct={handleUploadAct} uploadingActId={uploadingActId} />
-        ) : loading ? (
-          <div className="flex h-64 items-center justify-center"><Spinner size="lg" /></div>
-        ) : error ? (
-          <div className="rounded-lg border border-rose-200 bg-rose-50 p-5 text-center text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">{error}</div>
-        ) : filtered.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-slate-300 bg-white py-20 text-center shadow-sm dark:border-slate-700 dark:bg-slate-900">
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-lg bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"><Icon name="pulse" /></div>
-            <h2 className="font-bold text-slate-800 dark:text-white">Занятия не найдены</h2>
-            <p className="mt-1 text-sm text-slate-400">Измените дату или параметры поиска</p>
-          </div>
-        ) : tab === 'analytics' ? (
-          <div className="space-y-4">
-            <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-700 dark:text-blue-300">Сводка по выборке</p>
-              <p className="mt-3 max-w-2xl text-2xl font-bold text-slate-950 dark:text-white">Средний показатель качества — {avgScore.toFixed(1)} из 10 при посещаемости {avgAttendance.toFixed(0)}%.</p>
-              <div className="mt-6 h-3 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"><div className="h-full rounded-full bg-blue-700" style={{ width: `${Math.min(100, avgScore * 10)}%` }} /></div>
-            </div>
-            <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-              <table className="w-full min-w-[720px] text-left text-sm">
-                <thead className="bg-slate-50 text-xs uppercase text-slate-400 dark:bg-slate-800"><tr><th className="p-3">Преподаватель</th><th className="p-3">Дисциплина</th><th className="p-3">Аудитория</th><th className="p-3">Балл</th><th className="p-3">Посещаемость</th></tr></thead>
-                <tbody>{paginatedItems.map((record) => <tr key={record.id} className="border-t border-slate-100 dark:border-slate-800"><td className="p-3 font-semibold text-slate-900 dark:text-white">{record.teacher}</td><td className="p-3 text-slate-600 dark:text-slate-300">{record.subject}</td><td className="p-3 text-slate-600 dark:text-slate-300">{record.room || '—'}</td><td className="p-3 font-bold text-emerald-600">{Number(record.score || 0).toFixed(1)}</td><td className="p-3 text-slate-600 dark:text-slate-300">{Number(record.attendance || 0).toFixed(0)}%</td></tr>)}</tbody>
-              </table>
-            </div>
-          </div>
-        ) : (
-          <section>
-            <div className="mb-4 flex items-end justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-bold text-slate-900 dark:text-white">{tab === 'violations' ? 'Выявленные нарушения' : tab === 'archive' ? 'Архив мониторинга' : 'Занятия под наблюдением'}</h2>
-                <p className="text-xs text-slate-400">{new Date(`${date}T00:00:00`).toLocaleDateString(i18n.language, { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+      {tab === 'violations' ? (
+        <ViolationsReview
+          items={paginatedItems}
+          role={role}
+          onReview={handleReview}
+          onUploadAct={handleUploadAct}
+          uploadingActId={uploadingActId}
+          loading={violationsLoading}
+          error={violationsError}
+          onRetry={loadViolations}
+        />
+      ) : loading ? (
+        <Card><LoadingBlock label={t('monitoring.loading')} /></Card>
+      ) : error ? (
+        <Alert tone="danger" title={error}
+          action={<Button variant="secondary" size="sm" icon="refresh" onClick={loadRecords}>{t('ui.retry')}</Button>} />
+      ) : filtered.length === 0 ? (
+        <Card>
+          <EmptyState icon="monitor" title={t('monitoring.empty.title')} description={t('monitoring.empty.hint')} />
+        </Card>
+      ) : tab === 'analytics' ? (
+        <div className="flex min-w-0 flex-col gap-4">
+          <Card>
+            <CardHeader title={t('monitoring.analytics.title')} />
+            <CardBody className="flex flex-col gap-4">
+              <p className="max-w-2xl text-xl font-semibold text-fg">
+                {t('monitoring.analytics.summary', { score: avgScore.toFixed(1), attendance: avgAttendance.toFixed(0) })}
+              </p>
+              <div
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={10}
+                aria-valuenow={Number(avgScore.toFixed(1))}
+                aria-label={t('monitoring.analytics.progressLabel', { score: avgScore.toFixed(1) })}
+                className="h-2.5 overflow-hidden rounded-full bg-surface-hover"
+              >
+                <div className="h-full rounded-full bg-chart-1" style={{ width: `${Math.min(100, avgScore * 10)}%` }} />
               </div>
-              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">{filtered.length} записей</span>
+            </CardBody>
+          </Card>
+          <Card>
+            <CardHeader title={t('monitoring.analytics.tableTitle')} />
+            <DataTable
+              columns={analyticsColumns}
+              rows={paginatedItems}
+              caption={t('monitoring.analytics.tableTitle')}
+              empty={<EmptyState icon="chart" title={t('monitoring.empty.title')} compact />}
+            />
+          </Card>
+        </div>
+      ) : (
+        <section className="flex min-w-0 flex-col gap-4">
+          <div className="flex min-w-0 flex-wrap items-end justify-between gap-x-4 gap-y-2">
+            <div className="min-w-0">
+              <h2 className="text-lg font-semibold text-fg">{listTitle}</h2>
+              <p className="text-sm text-fg-muted">
+                {new Date(`${date}T00:00:00`).toLocaleDateString(dateLocale(i18n.language), { day: 'numeric', month: 'long', year: 'numeric' })}
+              </p>
             </div>
-            <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-              {paginatedItems.map((record) => <LessonCard key={record.id} record={record} onOpen={openViolation} />)}
-            </div>
-          </section>
-        )}
-        {!loading && !error && paginationItems.length > 0 && (
-          <Pagination
-            total={paginationItems.length}
-            page={safePage}
-            pageSize={pageSize}
-            onPageChange={setPage}
-            onPageSizeChange={setPageSize}
-          />
-        )}
-      </div>
+            <Badge tone="primary">{t('monitoring.list.count', { count: filtered.length })}</Badge>
+          </div>
+          <div className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {paginatedItems.map((record) => <LessonCard key={record.id} record={record} onOpen={openViolation} />)}
+          </div>
+        </section>
+      )}
 
-      {selectedLesson && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/55 p-3 backdrop-blur-sm sm:p-6">
-          <form onSubmit={saveViolation} className="my-auto w-full max-w-5xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-            <div className="flex items-start justify-between border-b border-slate-100 px-5 py-5 dark:border-slate-800 sm:px-7">
-              <div>
-                <h2 className="text-2xl font-bold text-slate-950 dark:text-white">Фиксация нарушения</h2>
-                <p className="mt-2 text-xs font-bold uppercase tracking-[0.12em] text-slate-400">Преподаватель: <span className="text-slate-800 dark:text-slate-200">{selectedLesson.teacher}</span></p>
-                <p className="mt-1 text-xs text-slate-500">{selectedLesson.subject} · аудитория {selectedLesson.room}</p>
-              </div>
-              <button type="button" onClick={() => setSelectedLesson(null)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800">Закрыть</button>
-            </div>
+      {!loading && !error && paginationItems.length > 0 && (
+        <Pagination
+          page={safePage}
+          pageCount={pageCount}
+          onPageChange={setPage}
+          total={paginationItems.length}
+          pageSize={pageSize}
+          onPageSizeChange={setPageSize}
+        />
+      )}
 
-            <div className="grid gap-6 p-5 sm:p-7 lg:grid-cols-[1.1fr_.9fr]">
-              <div className="space-y-6">
-                <div>
-                  <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Тип нарушения</p>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    {[
-                      'Отсутствие',
-                      'Опоздание (>15 мин)',
-                      'Нарушение методики преподавания',
-                      'Отпускает раньше времени',
-                      'Отсутствовали студенты',
-                      'Нарушение учебной дисциплины',
-                      'Несвоевременное заполнение LMS',
-                      'Нарушение трудовой дисциплины',
-                      'Ненадлежащий контроль при экзамене',
-                      'Прочее',
-                    ].map((type) => (
-                      <button key={type} type="button" onClick={() => setViolationType(type)} className={`min-h-14 rounded-lg border px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.09em] transition-colors ${violationType === type ? 'border-blue-700 bg-blue-50 text-blue-800 dark:border-blue-500 dark:bg-blue-950/30 dark:text-blue-300' : 'border-slate-200 bg-white text-slate-500 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800'}`}>{type}</button>
-                    ))}
+      {/* Фиксация нарушения */}
+      <Modal
+        open={!!selectedLesson}
+        onClose={() => setSelectedLesson(null)}
+        size="xl"
+        title={t('monitoring.form.title')}
+        description={selectedLesson ? t('monitoring.form.description', {
+          teacher: selectedLesson.teacher,
+          subject: selectedLesson.subject || '—',
+          room: selectedLesson.room || '—',
+        }) : undefined}
+        footer={(
+          <>
+            <Button variant="secondary" onClick={() => setSelectedLesson(null)}>{t('ui.cancel')}</Button>
+            <Button type="submit" form="violation-form" icon="check" loading={savingViolation}>
+              {savingViolation ? t('monitoring.form.saving') : t('monitoring.form.submit')}
+            </Button>
+          </>
+        )}
+      >
+        {selectedLesson && (
+          <form id="violation-form" onSubmit={saveViolation} className="flex min-w-0 flex-col gap-5">
+            {violationNotice && (
+              <Alert tone={violationNotice.tone} onClose={() => setViolationNotice(null)} closeLabel={t('ui.close')}>
+                {violationNotice.text}
+              </Alert>
+            )}
+
+            <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+              <div className="flex min-w-0 flex-col gap-5">
+                <fieldset className="min-w-0">
+                  <legend className="mb-2 text-sm font-medium text-fg">{t('monitoring.form.type')}</legend>
+                  <div role="radiogroup" className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+                    {VIOLATION_TYPES.map((type) => {
+                      const checked = violationType === type.value
+                      return (
+                        <label key={type.value}
+                          className={cn(
+                            'flex min-h-11 min-w-0 cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2.5 text-sm transition-colors',
+                            'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus',
+                            checked
+                              ? 'border-primary bg-primary-subtle font-medium text-primary-subtle-fg'
+                              : 'border-line bg-surface text-fg hover:bg-surface-hover',
+                          )}>
+                          <input type="radio" name="violation-type" value={type.value} checked={checked}
+                            onChange={() => setViolationType(type.value)}
+                            className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-[rgb(var(--primary))] focus-visible:outline-none" />
+                          <span className="min-w-0 break-words">{t(`monitoring.types.${type.key}`)}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </fieldset>
+
+                <Field label={t('monitoring.form.date')} required className="sm:max-w-xs">
+                  <Input type="date" value={violationDate} onChange={(e) => setViolationDate(e.target.value)} />
+                </Field>
+
+                <div className="flex min-w-0 flex-col gap-2">
+                  <Field label={t('monitoring.form.situation')}>
+                    <Textarea rows={5} placeholder={t('monitoring.form.situationPlaceholder')}
+                      value={violationDescription} onChange={(e) => setViolationDescription(e.target.value)} />
+                  </Field>
+                  <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                    <p className="min-w-0 flex-1 basis-56 text-xs text-fg-subtle">{t('monitoring.form.aiHint')}</p>
+                    <Button variant="secondary" size="sm" icon="sparkles" loading={improvingText}
+                      disabled={improvingText || violationDescription.trim().length < 3} onClick={improveDescription}>
+                      {improvingText ? t('monitoring.form.aiImproving') : t('monitoring.form.aiImprove')}
+                    </Button>
                   </div>
                 </div>
-
-                <label><span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Дата нарушения</span><input required type="date" className="input h-14 rounded-lg bg-white font-semibold dark:bg-slate-900" value={violationDate} onChange={(e) => setViolationDate(e.target.value)} /></label>
-                <div>
-                  <label>
-                    <span className="mb-2 block text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Описание ситуации</span>
-                    <textarea className="input min-h-36 rounded-lg bg-white p-4 dark:bg-slate-900" placeholder="Опишите ваши наблюдения..." value={violationDescription} onChange={(e) => setViolationDescription(e.target.value)} />
-                  </label>
-                  <div className="mt-2 flex items-center justify-between gap-3">
-                    <p className="text-xs text-slate-400">AI исправит ошибки и оформит текст в деловом стиле, не добавляя новых фактов.</p>
-                    <button type="button" onClick={improveDescription} disabled={improvingText || violationDescription.trim().length < 3} className="shrink-0 rounded-lg bg-blue-700 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50">
-                      {improvingText ? 'Улучшаю...' : 'Улучшить с AI'}
-                    </button>
-                  </div>
-                </div>
               </div>
 
-              <div>
-                <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Камера кабинета · Live</p>
-                {selectedCameraRoom ? (
-                  <div className={`${videoExpanded ? 'fixed inset-3 z-[60] flex flex-col rounded-lg border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 sm:inset-8' : 'overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900'}`}>
-                    <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 dark:border-slate-800">
-                      <span className="text-sm font-semibold text-slate-900 dark:text-white">Кабинет {selectedCameraRoom.name}</span>
-                      <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />Прямой эфир</span>
+              <div className="flex min-w-0 flex-col gap-4">
+                <div className="flex min-w-0 flex-col gap-2">
+                  <p className="text-sm font-medium text-fg">{t('monitoring.form.camera')}</p>
+                  {selectedCameraRoom ? (
+                    // Развёрнутый режим — в том же элементе (поток камеры не переоткрывается), слой z-modal
+                    <div className={cn(
+                      'flex min-w-0 flex-col overflow-hidden rounded-lg border border-line bg-surface-raised',
+                      videoExpanded && 'fixed inset-2 z-modal shadow-3 sm:inset-6',
+                    )}>
+                      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2">
+                        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                          <span className="min-w-0 break-words text-sm font-medium text-fg">
+                            {t('monitoring.form.cameraRoom', { name: selectedCameraRoom.name })}
+                          </span>
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success">
+                            <span className="h-2 w-2 animate-pulse rounded-full bg-success" aria-hidden="true" />
+                            {t('monitoring.form.live')}
+                          </span>
+                        </div>
+                        <Button variant="ghost" size="sm" icon={videoExpanded ? 'minimize' : 'maximize'}
+                          onClick={() => setVideoExpanded((value) => !value)}>
+                          {videoExpanded ? t('monitoring.form.collapse') : t('monitoring.form.expand')}
+                        </Button>
+                      </div>
+                      <div className={cn('overflow-hidden', MEDIA_BG, videoExpanded ? 'min-h-0 flex-1' : 'aspect-video')}>
+                        <CameraLive roomId={selectedCameraRoom.id}
+                          alt={t('monitoring.form.cameraAlt', { name: selectedCameraRoom.name })}
+                          className={cn('h-full w-full', videoExpanded ? 'object-contain' : 'object-cover')} />
+                      </div>
                     </div>
-                    <div className={`group relative overflow-hidden ${videoExpanded ? 'min-h-0 flex-1' : 'aspect-video'}`}>
-                      <img src={`/api/rooms/${selectedCameraRoom.id}/camera/live`} alt={`Live кабинет ${selectedCameraRoom.name}`} className="h-full w-full cursor-zoom-in object-cover transition-transform duration-300 group-hover:scale-[1.02]" />
-                      <button type="button" onClick={() => setVideoExpanded((value) => !value)} className="absolute right-3 top-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">{videoExpanded ? 'Свернуть' : 'На весь экран'}</button>
+                  ) : (
+                    <div className="flex min-h-40 min-w-0 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line px-4 py-6 text-center text-sm text-fg-muted">
+                      <Icon name="camera" size={22} className="text-fg-subtle" />
+                      <p className="min-w-0 break-words">{t('monitoring.form.noCamera', { room: selectedLesson.room || '—' })}</p>
                     </div>
-                  </div>
-                ) : (
-                  <div className="flex aspect-video items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white p-5 text-center text-sm text-slate-400 shadow-sm dark:border-slate-700 dark:bg-slate-900">Для аудитории {selectedLesson.room || '—'} камера не привязана</div>
-                )}
-                {selectedCameraRoom && (
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <button type="button" className="btn-secondary" disabled={Boolean(capturing)} onClick={() => captureEvidence('photo')}>{capturing === 'photo' ? 'Снимаем фото...' : 'Снять фото'}</button>
-                    <button type="button" className="btn-primary" disabled={Boolean(capturing)} onClick={() => captureEvidence('video')}>{capturing === 'video' ? 'Запись 10 сек...' : 'Записать видео'}</button>
-                  </div>
-                )}
+                  )}
+                  {selectedCameraRoom && (
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="secondary" icon="image" loading={capturing === 'photo'} disabled={Boolean(capturing)}
+                        onClick={() => captureEvidence('photo')}>
+                        {capturing === 'photo' ? t('monitoring.form.takingPhoto') : t('monitoring.form.takePhoto')}
+                      </Button>
+                      <Button variant="secondary" icon="video" loading={capturing === 'video'} disabled={Boolean(capturing)}
+                        onClick={() => captureEvidence('video')}>
+                        {capturing === 'video' ? t('monitoring.form.recordingVideo') : t('monitoring.form.recordVideo')}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
                 {evidence.length > 0 && (
-                  <div className="mt-4">
-                    <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Медиа доказательства</p>
-                    <div className="grid grid-cols-3 gap-2">
+                  <div className="flex min-w-0 flex-col gap-2">
+                    <p className="text-sm font-medium text-fg">{t('monitoring.form.media')}</p>
+                    <div className="grid min-w-0 grid-cols-3 gap-2">
                       {evidence.map((item) => (
-                        <a key={item.id} href={item.url} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-slate-200 bg-white text-center shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                        <a key={item.id} href={item.url} target="_blank" rel="noreferrer"
+                          className="flex min-w-0 flex-col overflow-hidden rounded-md border border-line bg-surface transition-colors hover:border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
                           {item.media_type === 'photo'
-                            ? <img src={item.url} alt="Снимок нарушения" className="aspect-video w-full object-cover" />
-                            : <div className="flex aspect-video items-center justify-center text-sm font-semibold text-slate-500">Видео</div>}
-                          <span className="block px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">{item.media_type === 'photo' ? 'Фото' : 'Видео'}</span>
+                            ? <img src={item.url} alt={t('monitoring.form.snapshotAlt')} className="aspect-video w-full object-cover" />
+                            : (
+                              <span className={cn('grid aspect-video w-full place-items-center text-fg-inverse', MEDIA_BG)}>
+                                <Icon name="video" size={20} />
+                              </span>
+                            )}
+                          <span className="min-w-0 px-2 py-1.5 text-xs font-medium text-fg-muted">
+                            {item.media_type === 'photo' ? t('monitoring.form.photo') : t('monitoring.form.video')}
+                          </span>
                         </a>
                       ))}
                     </div>
                   </div>
                 )}
-                <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-900/30 dark:bg-blue-950/20 dark:text-blue-300">
-                  Данные преподавателя, дисциплины и аудитории подставлены из выбранного занятия.
-                </div>
+
+                <Alert tone="info">{t('monitoring.form.prefilled')}</Alert>
               </div>
             </div>
-
-            <div className="flex justify-end gap-2 border-t border-slate-100 px-5 py-4 dark:border-slate-800 sm:px-7">
-              <button type="button" className="btn-secondary" onClick={() => setSelectedLesson(null)}>Отмена</button>
-              <button type="submit" className="btn-primary" disabled={savingViolation}>{savingViolation ? 'Сохранение...' : 'Зафиксировать нарушение'}</button>
-            </div>
           </form>
-        </div>
-      )}
-    </div>
+        )}
+      </Modal>
+
+      {/* Подтверждение/отклонение нарушения с необязательным комментарием */}
+      <Modal
+        open={!!reviewTarget}
+        onClose={() => setReviewTarget(null)}
+        size="sm"
+        title={reviewConfirming ? t('monitoring.review.confirmTitle') : t('monitoring.review.rejectTitle')}
+        footer={(
+          <>
+            <Button variant="secondary" onClick={() => setReviewTarget(null)}>{t('ui.cancel')}</Button>
+            <Button type="submit" form="violation-review-form" variant={reviewConfirming ? 'success' : 'danger'} loading={reviewing}>
+              {reviewConfirming ? t('monitoring.review.confirm') : t('monitoring.review.reject')}
+            </Button>
+          </>
+        )}
+      >
+        <form id="violation-review-form" onSubmit={submitReview}>
+          <Field label={reviewConfirming ? t('monitoring.review.confirmComment') : t('monitoring.review.rejectComment')}>
+            <Textarea rows={3} value={reviewComment} onChange={(e) => setReviewComment(e.target.value)} data-autofocus />
+          </Field>
+        </form>
+      </Modal>
+    </PageStack>
   )
 }

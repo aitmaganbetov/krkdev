@@ -64,8 +64,8 @@ export const getMe = () =>
 export const getRecords = (params) =>
   api.get('/records', { params }).then((r) => r.data)
 
-export const getRecordFilterOptions = () =>
-  api.get('/records/filter-options').then((r) => r.data)
+export const getRecordFilterOptions = (params) =>
+  api.get('/records/filter-options', { params }).then((r) => r.data)
 
 export const getDashboardFacultyComparison = (params) =>
   api.get('/records/dashboard/faculty-comparison', { params }).then((r) => r.data)
@@ -182,6 +182,33 @@ export const sendRecordToRework = (id) =>
 
 export const acceptRecord = (id) =>
   api.post(`/records/${id}/accept`).then((r) => r.data)
+
+// Справочник вопросов по учебным годам
+export const getRatingTemplates = () =>
+  api.get('/rating-templates').then((r) => r.data)
+
+export const createRatingTemplate = (data) =>
+  api.post('/rating-templates', data).then((r) => r.data)
+
+export const updateRatingTemplate = (academicYear, data) =>
+  api.put(`/rating-templates/${encodeURIComponent(academicYear)}`, data).then((r) => r.data)
+
+export const deleteRatingTemplate = (academicYear) =>
+  api.delete(`/rating-templates/${encodeURIComponent(academicYear)}`)
+
+// Справочник учебных годов
+export const getAcademicYears = () =>
+  api.get('/academic-years').then((r) => r.data)
+
+export const createAcademicYear = (name) =>
+  api.post('/academic-years', { name }).then((r) => r.data)
+
+export const deleteAcademicYear = (name) =>
+  api.delete(`/academic-years/${encodeURIComponent(name)}`)
+
+// name = null — по умолчанию снова текущий учебный год по дате
+export const setDefaultAcademicYear = (name) =>
+  api.put('/academic-years/default', { name }).then((r) => r.data)
 
 // Dashboard
 export const getDashboardStats = (params) =>

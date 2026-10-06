@@ -1,19 +1,17 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useParams, useNavigate } from 'react-router-dom'
+import { Link, useParams, useNavigate } from 'react-router-dom'
 import { getBasicInfoCatalog, getRecord, updateRecord } from '../services/api'
 import { useAuth } from '../context/AuthContext'
-import Spinner from '../components/Spinner'
 import StepIndicator from '../components/StepIndicator'
 import Step1Basic    from '../components/form/Step1Basic'
 import Step2Details  from '../components/form/Step2Details'
 import Step3Ratings  from '../components/form/Step3Ratings'
 import Step4Review   from '../components/form/Step4Review'
-import {
-  getRecordFormError,
-  getRecordFormStepError,
-  normalizeRatingsForForm,
-} from '../utils/recordForm'
+import { Alert, Button, Card, EmptyState, LoadingBlock, PageHeader, PageStack } from '../components/ui'
+import { formErrorText } from '../locales/recordForm'
+import { getRecordFormError, getRecordFormStepError } from '../utils/recordForm'
+import { findTemplate, normalizeRatings, useRatingTemplates } from '../utils/ratingTemplate'
 import { datetimeLocalToIsoUtcPlus5, toDatetimeLocalUtcPlus5 } from '../utils/datetime'
 
 const EDITABLE_FIELDS = [
@@ -48,6 +46,20 @@ export default function EditRecordPage() {
   const [catalogError, setCatalogError] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
+  // Подсветка незаполненных полей после неудачной попытки перейти дальше / сохранить
+  const [showErrors, setShowErrors] = useState(false)
+  const stepsRef = useRef(null)
+  const firstRender = useRef(true)
+  const { templates, loading: templatesLoading } = useRatingTemplates()
+  const academicYear = data?.academic_year
+  const template = useMemo(() => findTemplate(templates, academicYear), [templates, academicYear])
+
+  // Оценки записи приводим к справочнику её учебного года и вида занятия
+  const lessonType = data?.lesson_type
+  useEffect(() => {
+    if (!template) return
+    setData((d) => (d ? { ...d, ratings: normalizeRatings(template, d.ratings, d.lesson_type) } : d))
+  }, [template, lessonType])
 
   useEffect(() => {
     getRecord(id)
@@ -56,7 +68,7 @@ export default function EditRecordPage() {
         setData({
           ...r,
           datetime: dt,
-          ratings: normalizeRatingsForForm(r.ratings),
+          ratings: r.ratings || {},
         })
       })
       .catch(() => setError(t('common.notFound')))
@@ -76,27 +88,46 @@ export default function EditRecordPage() {
       .finally(() => setCatalogLoading(false))
   }, [])
 
-  if (loading) return <div className="flex justify-center py-20"><Spinner size="lg" /></div>
-  if (!data)   return <p className="text-red-500 text-center mt-20">{error}</p>
+  // При смене шага возвращаем к началу формы
+  useEffect(() => {
+    if (firstRender.current) { firstRender.current = false; return }
+    stepsRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [step])
+
+  if (loading) return <LoadingBlock label={t('ui.loading')} />
+  if (!data) {
+    return (
+      <Card>
+        <EmptyState
+          icon="file-text"
+          title={error || t('common.notFound')}
+          action={<Button as={Link} to="/records" variant="secondary" icon="arrow-left">{t('recordForm.backToList')}</Button>}
+        />
+      </Card>
+    )
+  }
 
   const update = (patch) => setData((d) => ({ ...d, ...patch }))
 
   const next = () => {
-    const stepError = getRecordFormStepError(step, data)
+    const stepError = getRecordFormStepError(step, data, template)
     if (stepError) {
       setError(stepError)
+      setShowErrors(true)
       return
     }
 
     setError('')
+    setShowErrors(false)
     setStep((s) => s + 1)
   }
-  const back = () => setStep((s) => s - 1)
+  const back = () => { setShowErrors(false); setStep((s) => s - 1) }
 
   const handleSave = async () => {
-    const formError = getRecordFormError(data)
+    const formError = getRecordFormError(data, template)
     if (formError) {
       setError(formError)
+      setShowErrors(true)
       return
     }
 
@@ -128,53 +159,70 @@ export default function EditRecordPage() {
   }
 
   return (
-    <div className="w-full">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t('createRecord.editTitle')} #{id}</h1>
+    <PageStack>
+      <PageHeader
+        title={t('recordForm.editTitle', { id })}
+        back={{ to: `/records/${id}`, label: t('recordForm.backToRecord') }}
+      />
+
+      <div ref={stepsRef} className="min-w-0 scroll-mt-20">
+        <Card padded>
+          <StepIndicator current={step} />
+        </Card>
       </div>
 
-      <div className="card p-6">
-        <StepIndicator current={step} />
+      <div className="min-w-0">
+        {step === 0 && (
+          <Step1Basic
+            data={data}
+            onChange={update}
+            catalog={catalog}
+            catalogLoading={catalogLoading}
+            catalogError={catalogError}
+            showErrors={showErrors}
+          />
+        )}
+        {step === 1 && (
+          <Step2Details
+            data={{ ...data, academic_year_options: catalog.academic_years || [] }}
+            onChange={update}
+            showErrors={showErrors}
+          />
+        )}
+        {step === 2 && (
+          <Step3Ratings
+            ratings={data.ratings}
+            onChange={(r) => update({ ratings: r })}
+            template={template}
+            academicYear={data.academic_year}
+            lessonType={data.lesson_type}
+            templatesLoading={templatesLoading}
+            showErrors={showErrors}
+          />
+        )}
+        {step === 3 && <Step4Review data={data} onChange={update} template={template} showErrors={showErrors} />}
+      </div>
 
-        <div className="min-h-[320px]">
-          {step === 0 && (
-            <Step1Basic
-              data={data}
-              onChange={update}
-              catalog={catalog}
-              catalogLoading={catalogLoading}
-              catalogError={catalogError}
-            />
-          )}
-          {step === 1 && <Step2Details data={{ ...data, academic_year_options: catalog.academic_years || [] }} onChange={update} />}
-          {step === 2 && <Step3Ratings ratings={data.ratings} onChange={(r) => update({ ratings: r })} />}
-          {step === 3 && <Step4Review data={data} onChange={update} />}
-        </div>
+      {error && (
+        <Alert tone="danger" onClose={() => setError('')} closeLabel={t('ui.close')}>
+          {formErrorText(t, error)}
+        </Alert>
+      )}
 
-        {error && (
-          <div className="mt-4 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded-lg">
-            {error}
-          </div>
+      {/* Навигация по шагам */}
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-line pt-4">
+        {step === 0 ? (
+          <Button variant="secondary" onClick={() => navigate(`/records/${id}`)}>{t('common.cancel')}</Button>
+        ) : (
+          <Button variant="secondary" icon="arrow-left" onClick={back}>{t('recordForm.back')}</Button>
         )}
 
-        <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-100 dark:border-gray-800">
-          <button
-            type="button"
-            onClick={step === 0 ? () => navigate(`/records/${id}`) : back}
-            className="btn-secondary"
-          >
-            {step === 0 ? t('common.cancel') : t('common.back')}
-          </button>
-
-          {step < 3 ? (
-            <button type="button" onClick={next} className="btn-primary">{t('common.next')}</button>
-          ) : (
-            <button type="button" onClick={handleSave} disabled={saving} className="btn-primary">
-              {saving ? <Spinner size="sm" /> : t('common.saveChanges')}
-            </button>
-          )}
-        </div>
+        {step < 3 ? (
+          <Button iconRight="chevron-right" onClick={next}>{t('recordForm.next')}</Button>
+        ) : (
+          <Button icon="check" onClick={handleSave} loading={saving}>{t('common.saveChanges')}</Button>
+        )}
       </div>
-    </div>
+    </PageStack>
   )
 }

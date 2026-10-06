@@ -1,14 +1,20 @@
 import { useEffect, useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { getRecords, deleteRecord, getBasicInfoCatalog } from '../services/api'
+import { getRecords, deleteRecord, getBasicInfoCatalog, getAcademicYears } from '../services/api'
 import { useAuth } from '../context/AuthContext'
-import Spinner from '../components/Spinner'
 import StatusBadge from '../components/StatusBadge'
+import {
+  Alert, Button, Card, DataTable, EmptyState, Field, FilterBar, PageHeader, PageStack, Pagination,
+  SearchInput, Select, useUI,
+} from '../components/ui'
 import { formatDateTimeUtcPlus5, formatDateUtcPlus5 } from '../utils/datetime'
+import { applicableSections, findTemplate, loadRatingTemplates, localized, templateMaxScore } from '../utils/ratingTemplate'
 
 const DEFAULT_PAGE_SIZE = 20
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
+
+const RATING_COLUMNS_PLACEHOLDER = { placeholder: 'ratings' }
 
 const EXPORT_COLUMNS = [
   { header: 'Порядковый номер', value: (_r, index) => index + 1 },
@@ -24,47 +30,62 @@ const EXPORT_COLUMNS = [
   { header: 'Группа/ ОП', value: (r) => [r.group_name, r.op].filter(Boolean).join(' / ') },
   { header: 'Посещаемость %', value: (r) => `${Number(r.attendance || 0).toFixed(1).replace('.', ',')}%` },
   { header: 'Учебный год', value: (r) => r.academic_year || '' },
-  { header: 'Соответствие темы и содержания занятия силлабусу', value: (r) => r.ratings?.['1.1'] ?? '' },
-  { header: 'Системность и логическая последовательность в содержании материала', value: (r) => r.ratings?.['1.2'] ?? '' },
-  { header: 'Содержание и изложение учебного материала', value: (r) => r.ratings?.['1.3'] ?? '' },
-  { header: 'Организация самостоятельной работы обучающихся', value: (r) => r.ratings?.['1.4'] ?? '' },
-  { header: 'Использование эффективных методов контроля хода занятия и результатов выполнения заданий обучающимися', value: (r) => r.ratings?.['1.5'] ?? '' },
-  { header: 'Рациональность использования времени на изучение учебных вопросов', value: (r) => r.ratings?.['1.6'] ?? '' },
-  { header: 'Преподавание дисциплины на языке обучения (казахском, английском, русском)', value: (r) => r.ratings?.['1.7'] ?? '' },
-  { header: 'Использование приемов поддержания внимания обучающихся и способность установить с ними контакт', value: (r) => r.ratings?.['2.1'] ?? '' },
-  { header: 'Умение вызвать и поддержать интерес аудитории к дисциплине', value: (r) => r.ratings?.['2.2'] ?? '' },
-  { header: 'Ясность и доступность учебного материала', value: (r) => r.ratings?.['2.3'] ?? '' },
-  { header: 'Культура речи, речевые данные, дикция, эрудиция, внешний вид, манера поведения, умение держаться перед аудиторией', value: (r) => r.ratings?.['2.4'] ?? '' },
-  { header: 'Доброжелательность и такт по отношению к обучающемуся', value: (r) => r.ratings?.['2.5'] ?? '' },
-  { header: 'Организация и активизация деятельности обучающихся, побуждение их к высказыванию, выступлению; анализ выступлений и замечаний, сделанных по их ходу', value: (r) => r.ratings?.['2.6'] ?? '' },
-  { header: 'Использование технических средств обучения, современных интерактивных методов обучения, цифровых образовательных ресурсов, прикладного программного обеспечения, использование записей на доске, наглядных пособий, раздаточного материала', value: (r) => r.ratings?.['3.1'] ?? '' },
-  { header: 'Творческий подход и интерес к своему делу', value: (r) => r.ratings?.['3.2'] ?? '' },
-  { header: 'Практическое применение знаний, полученных по предполагаемой дисциплине. Практик ориентированность', value: (r) => r.ratings?.['3.3'] ?? '' },
-  { header: 'Актуальность и новизна предлагаемого материала.', value: (r) => r.ratings?.['3.4'] ?? '' },
+  // сюда подставляются колонки вопросов из справочника (см. buildRatingColumns)
+  RATING_COLUMNS_PLACEHOLDER,
   { header: 'Уровень владения английским языком', value: () => '' },
   { header: 'Обязательное заполнение комментарий по занятию, отражение пунктов, по которым снижена оценка или что наиболее понравилось в проведение занятия', value: (r) => r.comment || '' },
   { header: 'Сумма', value: (r) => (Number.isFinite(Number(r.score)) ? Number(r.score).toFixed(2).replace('.', ',') : '') },
   { header: 'Created at', value: (r) => formatDateUtcPlus5(r.created_at) },
 ]
 
-const RATING_HEADER_TO_KEY = {
-  'Соответствие темы и содержания занятия силлабусу': '1.1',
-  'Системность и логическая последовательность в содержании материала': '1.2',
-  'Содержание и изложение учебного материала': '1.3',
-  'Организация самостоятельной работы обучающихся': '1.4',
-  'Использование эффективных методов контроля хода занятия и результатов выполнения заданий обучающимися': '1.5',
-  'Рациональность использования времени на изучение учебных вопросов': '1.6',
-  'Преподавание дисциплины на языке обучения (казахском, английском, русском)': '1.7',
-  'Использование приемов поддержания внимания обучающихся и способность установить с ними контакт': '2.1',
-  'Умение вызвать и поддержать интерес аудитории к дисциплине': '2.2',
-  'Ясность и доступность учебного материала': '2.3',
-  'Культура речи, речевые данные, дикция, эрудиция, внешний вид, манера поведения, умение держаться перед аудиторией': '2.4',
-  'Доброжелательность и такт по отношению к обучающемуся': '2.5',
-  'Организация и активизация деятельности обучающихся, побуждение их к высказыванию, выступлению; анализ выступлений и замечаний, сделанных по их ходу': '2.6',
-  'Использование технических средств обучения, современных интерактивных методов обучения, цифровых образовательных ресурсов, прикладного программного обеспечения, использование записей на доске, наглядных пособий, раздаточного материала': '3.1',
-  'Творческий подход и интерес к своему делу': '3.2',
-  'Практическое применение знаний, полученных по предполагаемой дисциплине. Практик ориентированность': '3.3',
-  'Актуальность и новизна предлагаемого материала.': '3.4',
+function questionTitle(question) {
+  return question.report_title || localized(question.text, 'ru') || question.code
+}
+
+// Вопросы, которые были в анкете этой записи (год + вид занятия): код -> заголовок
+function recordQuestionTitles(templates, record) {
+  const template = findTemplate(templates, record.academic_year)
+  const titles = new Map()
+  applicableSections(template, record.lesson_type).forEach((section) => {
+    (section.questions || []).forEach((question) => titles.set(question.code, questionTitle(question)))
+  })
+  return titles
+}
+
+// Колонки вопросов по анкетам выгружаемых записей. Один и тот же вопрос (код + формулировка)
+// в разных годах или видах занятия идёт одной колонкой; разные формулировки — разными.
+function buildRatingColumns(templates, rows) {
+  const ordered = [...rows].sort((a, b) => String(b.academic_year).localeCompare(String(a.academic_year)))
+  const columns = []
+  const byKey = new Map()
+  ordered.forEach((record) => {
+    recordQuestionTitles(templates, record).forEach((title, code) => {
+      const key = `${code}\u0000${title}`
+      if (!byKey.has(key)) {
+        const column = { code, title }
+        byKey.set(key, column)
+        columns.push(column)
+      }
+    })
+  })
+
+  const titlesByRecord = new Map(rows.map((record) => [record, recordQuestionTitles(templates, record)]))
+  const codeCounts = columns.reduce((acc, c) => ({ ...acc, [c.code]: (acc[c.code] || 0) + 1 }), {})
+  return columns.map((column) => {
+    const hasQuestion = (r) => titlesByRecord.get(r)?.get(column.code) === column.title
+    return {
+      header: codeCounts[column.code] > 1 ? `${column.code}. ${column.title}` : column.title,
+      ratingCode: column.code,
+      hasQuestion,
+      value: (r) => (hasQuestion(r) ? (r.ratings?.[column.code] ?? '') : ''),
+    }
+  })
+}
+
+function buildExportColumns(templates, rows) {
+  return EXPORT_COLUMNS.flatMap((column) => (
+    column === RATING_COLUMNS_PLACEHOLDER ? buildRatingColumns(templates, rows) : [column]
+  ))
 }
 
 const EXCEL_ACCENT_FILL = '87CEEB'
@@ -125,10 +146,20 @@ function createMetricChartDataUrl({ title, value, maxValue, displayValue, color 
   return canvas.toDataURL('image/png')
 }
 
+// Цвет балла: те же пороги, что и раньше (≥ 7 — норма, ≥ 5 — внимание, ниже — нарушение)
+function scoreToneClass(score) {
+  if (score >= 7) return 'text-success'
+  if (score >= 5) return 'text-warning'
+  return 'text-danger'
+}
+
+const STATUS_FILTER_VALUES = ['draft', 'submitted', 'rework', 'accepted']
+
 export default function RecordsPage() {
   const navigate = useNavigate()
   const { role } = useAuth()
   const { t } = useTranslation()
+  const { toast, confirm } = useUI()
   const canManageRecords = role === 'admin'
   const canExportRecords = role === 'admin' || role === 'inspector'
 
@@ -144,6 +175,8 @@ export default function RecordsPage() {
   // Filters
   const [search, setSearch] = useState('')
   const [filterYear, setFilterYear] = useState('')
+  // Пока не известен учебный год по умолчанию, список не грузим, чтобы не мигал «все годы»
+  const [yearReady, setYearReady] = useState(false)
   const [filterFaculty, setFilterFaculty] = useState('')
   const [filterOp, setFilterOp] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
@@ -209,19 +242,39 @@ export default function RecordsPage() {
     }
   }, [search, filterYear, filterFaculty, filterOp, filterStatus, pageSize, t])
 
+  // Фильтр по умолчанию — учебный год из справочника (выбран админом или текущий по дате)
   useEffect(() => {
+    getAcademicYears()
+      .then((years) => {
+        const defaultYear = years.find((year) => year.is_default)?.name
+        if (defaultYear) setFilterYear((current) => current || defaultYear)
+      })
+      .catch(() => {})
+      .finally(() => setYearReady(true))
+  }, [])
+
+  useEffect(() => {
+    if (!yearReady) return
     setPage(0)
     fetchRecords(0)
-  }, [fetchRecords])
+  }, [fetchRecords, yearReady])
 
-  const handleDelete = async (id) => {
-    if (!window.confirm(t('records.deleteConfirm'))) return
+  const handleDelete = async (record) => {
+    const { id } = record
+    const ok = await confirm({
+      title: t('recordsList.deleteConfirmTitle'),
+      message: t('recordsList.deleteConfirm', { teacher: record.teacher || '—' }),
+      confirmLabel: t('ui.delete'),
+      tone: 'danger',
+    })
+    if (!ok) return
     setDeleting(id)
     try {
       await deleteRecord(id)
       fetchRecords(page)
+      toast.success(t('recordsList.deleted'))
     } catch {
-      alert(t('records.deleteError'))
+      toast.error(t('recordsList.deleteError'))
     } finally {
       setDeleting(null)
     }
@@ -262,28 +315,32 @@ export default function RecordsPage() {
       const acceptedRows = rows.filter((record) => record.status === 'accepted')
 
       if (!acceptedRows.length) {
-        alert(t('records.notFound'))
+        toast.warning(t('recordsList.exportEmpty'))
         return
       }
 
-      const headerRow = EXPORT_COLUMNS.map((column) => column.header)
-      const valueRows = acceptedRows.map((record, index) => EXPORT_COLUMNS.map((column) => column.value(record, index)))
+      const templates = await loadRatingTemplates()
+      const exportColumns = buildExportColumns(templates, acceptedRows)
+      const headerRow = exportColumns.map((column) => column.header)
+      const valueRows = acceptedRows.map((record, index) => exportColumns.map((column) => column.value(record, index)))
       const totalStudentsPlan = acceptedRows.reduce((sum, record) => sum + Number(record.students_plan || 0), 0)
       const totalStudentsFact = acceptedRows.reduce((sum, record) => sum + Number(record.students_fact || 0), 0)
       const averageScore = acceptedRows.reduce((sum, record) => sum + Number(record.score || 0), 0) / acceptedRows.length
       const totalAttendancePercent = totalStudentsPlan > 0 ? (totalStudentsFact / totalStudentsPlan) * 100 : 0
       const averageAttendance = acceptedRows.reduce((sum, record) => sum + Number(record.attendance || 0), 0) / acceptedRows.length
-      const problemRecords = acceptedRows.filter((record) => Number(record.score || 0) < 5 || Number(record.attendance || 0) < 40).length
+      const problemRecords = acceptedRows.filter((record) => record.is_problem).length
+      const maxScore = Math.max(...acceptedRows.map((record) => templateMaxScore(findTemplate(templates, record.academic_year))))
 
-      const summaryRow = EXPORT_COLUMNS.map((column) => {
+      const summaryRow = exportColumns.map((column) => {
         if (column.header === 'Порядковый номер') return 'ИТОГ'
         if (column.header === 'Преподаватель') return `Записей: ${acceptedRows.length}`
         if (column.header === 'Посещаемость %') return `${totalAttendancePercent.toFixed(1).replace('.', ',')}%`
         if (column.header === 'Сумма') return averageScore.toFixed(2).replace('.', ',')
 
-        const ratingKey = RATING_HEADER_TO_KEY[column.header]
-        if (ratingKey) {
-          const averageRating = acceptedRows.reduce((sum, record) => sum + Number(record.ratings?.[ratingKey] || 0), 0) / acceptedRows.length
+        if (column.ratingCode) {
+          const rated = acceptedRows.filter((record) => column.hasQuestion(record) && Number.isFinite(Number(record.ratings?.[column.ratingCode])))
+          if (!rated.length) return ''
+          const averageRating = rated.reduce((sum, record) => sum + Number(record.ratings[column.ratingCode]), 0) / rated.length
           return averageRating.toFixed(2).replace('.', ',')
         }
 
@@ -298,10 +355,10 @@ export default function RecordsPage() {
 
       worksheet.autoFilter = {
         from: { row: 1, column: 1 },
-        to: { row: 1, column: EXPORT_COLUMNS.length },
+        to: { row: 1, column: exportColumns.length },
       }
 
-      worksheet.columns = EXPORT_COLUMNS.map((_, columnIndex) => {
+      worksheet.columns = exportColumns.map((_, columnIndex) => {
         const maxLength = allRows.reduce((currentMax, row) => {
           const rawValue = row[columnIndex]
           const normalized = rawValue === null || rawValue === undefined ? '' : String(rawValue)
@@ -373,7 +430,7 @@ export default function RecordsPage() {
         {
           title: 'Средний балл',
           value: averageScore,
-          maxValue: 10,
+          maxValue: maxScore,
           displayValue: averageScore.toFixed(2).replace('.', ','),
           color: '#0EA5E9',
         },
@@ -421,7 +478,7 @@ export default function RecordsPage() {
       link.click()
       URL.revokeObjectURL(url)
     } catch {
-      alert(t('records.exportError'))
+      toast.error(t('recordsList.exportError'))
     } finally {
       setExporting(false)
     }
@@ -437,327 +494,232 @@ export default function RecordsPage() {
     fetchRecords(next)
   }
 
-  const pageTokens = (() => {
-    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i)
-    const candidates = new Set([0, 1, page - 1, page, page + 1, totalPages - 2, totalPages - 1])
-    const sorted = [...candidates].filter((v) => v >= 0 && v < totalPages).sort((a, b) => a - b)
-    const tokens = []
-    for (let i = 0; i < sorted.length; i += 1) {
-      if (i > 0 && sorted[i] - sorted[i - 1] > 1) tokens.push('ellipsis')
-      tokens.push(sorted[i])
-    }
-    return tokens
-  })()
+  // Есть ли активные условия отбора — от этого зависит текст пустого состояния
+  const hasFilters = Boolean(search || filterYear || filterFaculty || filterOp || filterStatus)
+
+  // Сброс условий — то же, что пользователь выбрал бы «все» в каждом поле
+  const resetFilters = () => {
+    setSearch('')
+    setFilterYear('')
+    setFilterFaculty('')
+    setFilterOp('')
+    setFilterStatus('')
+    setPage(0)
+  }
+
+  const statusOptions = STATUS_FILTER_VALUES.map((value) => ({ value, label: t(`status.${value}`) }))
+
+  const columns = [
+    {
+      key: 'teacher',
+      header: t('records.teacher'),
+      mobile: 'title',
+      minWidth: '13rem',
+      cell: (r) => <span className="font-medium text-fg">{r.teacher || '—'}</span>,
+    },
+    { key: 'subject', header: t('records.subject'), minWidth: '12rem', cell: (r) => r.subject || '—' },
+    { key: 'group_name', header: t('records.group'), nowrap: true, cell: (r) => r.group_name || '—' },
+    {
+      key: 'op',
+      header: t('records.op'),
+      minWidth: '11rem',
+      mobile: 'hidden',
+      cell: (r) => r.op || '—',
+    },
+    { key: 'lesson_type', header: t('records.type'), cell: (r) => r.lesson_type || '—' },
+    {
+      key: 'score',
+      header: t('records.score'),
+      align: 'right',
+      nowrap: true,
+      cell: (r) => <span className={`font-semibold tabular ${scoreToneClass(r.score)}`}>{r.score.toFixed(1)}</span>,
+    },
+    {
+      key: 'attendance',
+      header: t('records.attendance'),
+      align: 'right',
+      nowrap: true,
+      cell: (r) => <span className="tabular">{r.attendance.toFixed(0)}%</span>,
+    },
+    {
+      key: 'savedBy',
+      header: t('records.savedBy'),
+      minWidth: '10rem',
+      mobile: 'hidden',
+      cell: (r) => r.submitted_by_display || r.submitted_by || '—',
+    },
+    { key: 'status', header: t('records.status'), nowrap: true, cell: (r) => <StatusBadge status={r.status} /> },
+    {
+      key: 'datetime',
+      header: t('records.date'),
+      nowrap: true,
+      cell: (r) => <span className="tabular text-fg-muted">{formatDateUtcPlus5(r.datetime)}</span>,
+    },
+  ]
+
+  if (canManageRecords) {
+    columns.push({
+      key: 'actions',
+      header: <span className="sr-only">{t('ui.actions')}</span>,
+      mobileLabel: t('ui.actions'),
+      align: 'right',
+      nowrap: true,
+      cell: (r) => (
+        // Клик по кнопкам не должен открывать запись (клик по строке)
+        <div className="inline-flex flex-wrap items-center gap-1" onClick={(e) => e.stopPropagation()}>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon="edit"
+            iconOnly
+            aria-label={t('recordsList.editAction')}
+            onClick={() => navigate(`/records/${r.id}/edit`)}
+          />
+          <Button
+            variant="danger-ghost"
+            size="sm"
+            icon="trash"
+            iconOnly
+            aria-label={t('recordsList.deleteAction')}
+            loading={deleting === r.id}
+            onClick={() => handleDelete(r)}
+          />
+        </div>
+      ),
+    })
+  }
+
+  const emptyState = hasFilters ? (
+    <EmptyState
+      icon="filter"
+      title={t('recordsList.filteredTitle')}
+      description={t('recordsList.filteredHint')}
+      action={<Button variant="secondary" size="sm" icon="rotate-ccw" onClick={resetFilters}>{t('recordsList.filters.reset')}</Button>}
+    />
+  ) : (
+    <EmptyState
+      icon="records"
+      title={t('recordsList.emptyTitle')}
+      description={t('recordsList.emptyHint')}
+      action={<Button as={Link} to="/records/new" size="sm" icon="plus">{t('recordsList.add')}</Button>}
+    />
+  )
 
   return (
-    <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t('records.title')}</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            {total === 1 ? t('records.count_one', { count: 1 }) : total < 5 ? t('records.count_few', { count: total }) : t('records.count_many', { count: total })}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {canExportRecords && (
-            <button
-              className="btn-secondary"
-              onClick={handleExportExcel}
-              disabled={loading || exporting}
-            >
-              {exporting ? t('records.exporting') : t('records.exportExcel')}
-            </button>
-          )}
-          <button className="btn-primary" onClick={() => navigate('/records/new')}>
-            + {t('records.addRecord')}
-          </button>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="card p-4 flex flex-col sm:flex-row gap-3">
-        <input
-          className="input flex-1"
-          placeholder={t('records.searchPlaceholderFull')}
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value)
-            setPage(0)
-          }}
-        />
-        <select
-          className="input sm:w-52"
-          value={filterYear}
-          onChange={(e) => {
-            setFilterYear(e.target.value)
-            setPage(0)
-          }}
-        >
-          <option value="">{t('records.allYears')}</option>
-          {academicYears.map((y) => (
-            <option key={y} value={y}>{y}</option>
-          ))}
-        </select>
-        <select
-          className="input sm:w-60"
-          value={filterFaculty}
-          onChange={(e) => {
-            setFilterFaculty(e.target.value)
-            setFilterOp('')
-            setPage(0)
-          }}
-        >
-          <option value="">{t('dashboard.allFaculties')}</option>
-          {faculties.map((facultyName) => (
-            <option key={facultyName} value={facultyName}>{facultyName}</option>
-          ))}
-        </select>
-        <select
-          className="input sm:w-64"
-          value={filterOp}
-          onChange={(e) => {
-            setFilterOp(e.target.value)
-            setPage(0)
-          }}
-        >
-          <option value="">{t('records.allOps')}</option>
-          {opOptions.map((opValue) => (
-            <option key={opValue} value={opValue}>{opValue}</option>
-          ))}
-        </select>
-        <select
-          className="input sm:w-44"
-          value={filterStatus}
-          onChange={(e) => {
-            setFilterStatus(e.target.value)
-            setPage(0)
-          }}
-        >
-          <option value="">{t('records.allStatuses')}</option>
-          <option value="draft">{t('status.draft')}</option>
-          <option value="submitted">{t('status.submitted')}</option>
-          <option value="rework">{t('status.rework')}</option>
-          <option value="accepted">{t('status.accepted')}</option>
-        </select>
-      </div>
-
-      {/* Table */}
-      <div className="card overflow-hidden">
-        {loading ? (
-          <div className="flex justify-center py-16"><Spinner size="lg" /></div>
-        ) : error ? (
-          <p className="text-center text-red-500 py-16">{error}</p>
-        ) : (
+    <PageStack>
+      <PageHeader
+        title={t('records.title')}
+        description={t('records.count', { count: total })}
+        actions={(
           <>
-            {/* Mobile: card list */}
-            <div className="md:hidden divide-y divide-gray-100 dark:divide-gray-800">
-              {items.map((r) => (
-                <div key={r.id} className="p-4 hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors">
-                  <div
-                    className="flex items-start justify-between gap-3 cursor-pointer"
-                    onClick={() => navigate(`/records/${r.id}`)}
-                  >
-                    <div className="min-w-0">
-                      <p className="font-medium text-gray-900 dark:text-gray-100 leading-snug">{r.teacher}</p>
-                      <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{r.subject}</p>
-                    </div>
-                    <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                      <StatusBadge status={r.status} />
-                      <span className={`text-base font-bold ${
-                        r.score >= 7 ? 'text-green-600 dark:text-green-400'
-                          : r.score >= 5 ? 'text-yellow-600 dark:text-yellow-400'
-                            : 'text-red-600 dark:text-red-400'
-                      }`}>{r.score.toFixed(1)}</span>
-                    </div>
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    <span>{r.group_name}</span>
-                    <span>{r.lesson_type}</span>
-                    <span>{r.attendance.toFixed(0)}% {t('records.attendance').replace(' %', '')}</span>
-                    <span>{formatDateUtcPlus5(r.datetime)}</span>
-                  </div>
-                  {canManageRecords && (
-                    <div className="mt-2 flex gap-3 text-xs">
-                      <button
-                        className="text-primary-600 dark:text-primary-400 hover:underline"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          navigate(`/records/${r.id}/edit`)
-                        }}
-                      >
-                        {t('records.edit')}
-                      </button>
-                      <button
-                        className="text-red-500 hover:underline disabled:opacity-40"
-                        disabled={deleting === r.id}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDelete(r.id)
-                        }}
-                      >
-                        {deleting === r.id ? '…' : t('records.delete')}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-              {items.length === 0 && (
-                <p className="text-center py-12 text-gray-400">{t('records.notFound')}</p>
-              )}
-            </div>
-
-            {/* Desktop: table */}
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide bg-gray-50 dark:bg-gray-800/50">
-                    <th className="px-4 py-3">{t('records.teacher')}</th>
-                    <th className="px-4 py-3">{t('records.subject')}</th>
-                    <th className="px-4 py-3">{t('records.group')}</th>
-                    <th className="px-4 py-3">{t('records.op')}</th>
-                    <th className="px-4 py-3">{t('records.type')}</th>
-                    <th className="px-4 py-3">{t('records.score')}</th>
-                    <th className="px-4 py-3">{t('records.attendance')}</th>
-                    <th className="px-4 py-3">{t('records.savedBy')}</th>
-                    <th className="px-4 py-3">{t('records.status')}</th>
-                    <th className="px-4 py-3">{t('records.date')}</th>
-                    <th className="px-4 py-3"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                  {items.map((r) => (
-                    <tr
-                      key={r.id}
-                      className="hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors"
-                    >
-                      <td
-                        className="px-4 py-3 font-medium text-gray-900 dark:text-gray-100 cursor-pointer hover:text-primary-600 dark:hover:text-primary-400"
-                        onClick={() => navigate(`/records/${r.id}`)}
-                      >
-                        {r.teacher}
-                      </td>
-                      <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{r.subject}</td>
-                      <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{r.group_name}</td>
-                      <td className="px-4 py-3 text-gray-600 dark:text-gray-400 max-w-[120px] truncate">{r.op}</td>
-                      <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{r.lesson_type}</td>
-                      <td className="px-4 py-3">
-                        <span className={`font-semibold ${
-                          r.score >= 7 ? 'text-green-600 dark:text-green-400'
-                            : r.score >= 5 ? 'text-yellow-600 dark:text-yellow-400'
-                              : 'text-red-600 dark:text-red-400'
-                        }`}>
-                          {r.score.toFixed(1)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{r.attendance.toFixed(0)}%</td>
-                      <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{r.submitted_by_display || r.submitted_by || '—'}</td>
-                      <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
-                      <td className="px-4 py-3 text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                        {formatDateUtcPlus5(r.datetime)}
-                      </td>
-                      <td className="px-4 py-3">
-                        {canManageRecords ? (
-                          <div className="flex items-center gap-2">
-                            <button
-                              className="text-xs text-primary-600 dark:text-primary-400 hover:underline"
-                              onClick={() => navigate(`/records/${r.id}/edit`)}
-                            >
-                              {t('records.edit')}
-                            </button>
-                            <button
-                              className="text-xs text-red-500 hover:underline disabled:opacity-40"
-                              disabled={deleting === r.id}
-                              onClick={() => handleDelete(r.id)}
-                            >
-                              {deleting === r.id ? '…' : t('records.delete')}
-                            </button>
-                          </div>
-                        ) : null}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {items.length === 0 && (
-                <p className="text-center py-12 text-gray-400">{t('records.notFound')}</p>
-              )}
-            </div>
-
-            {/* Pagination */}
-            {total > 0 && (
-              <div className="flex flex-col gap-3 px-4 py-3 border-t border-gray-100 dark:border-gray-800">
-
-                {/* Total + page size */}
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    {t('records.totalRecords')}: <span className="font-semibold">{total}</span>
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-gray-500 dark:text-gray-400">{t('records.pageSize')}:</span>
-                    <select
-                      className="input w-20 text-sm py-1"
-                      value={pageSize}
-                      onChange={(e) => {
-                        setPageSize(Number(e.target.value))
-                        setPage(0)
-                      }}
-                    >
-                      {PAGE_SIZE_OPTIONS.map((s) => (
-                        <option key={s} value={s}>{s}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                {/* Prev / page numbers / Next */}
-                {totalPages > 1 && (
-                  <div className="flex flex-wrap items-center gap-1">
-                    <button
-                      className="btn-secondary text-xs px-3 py-1"
-                      disabled={page === 0}
-                      onClick={() => goToPage(page - 1)}
-                    >
-                      {t('records.prev')}
-                    </button>
-
-                    {pageTokens.map((token, idx) =>
-                      token === 'ellipsis' ? (
-                        <span key={`e-${idx}`} className="px-1 text-gray-400 select-none">…</span>
-                      ) : (
-                        <button
-                          key={token}
-                          onClick={() => goToPage(token)}
-                          className={`h-8 min-w-[2rem] px-2 rounded-md text-xs border transition-colors ${
-                            token === page
-                              ? 'bg-primary-600 border-primary-600 text-white'
-                              : 'border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
-                          }`}
-                        >
-                          {token + 1}
-                        </button>
-                      )
-                    )}
-
-                    <button
-                      className="btn-secondary text-xs px-3 py-1"
-                      disabled={page + 1 >= totalPages}
-                      onClick={() => goToPage(page + 1)}
-                    >
-                      {t('records.next')}
-                    </button>
-
-                    <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">
-                      {t('records.page')} {page + 1} {t('records.of')} {totalPages}
-                    </span>
-                  </div>
-                )}
-
-              </div>
+            {canExportRecords && (
+              <Button
+                variant="secondary"
+                icon="download"
+                loading={exporting}
+                disabled={loading}
+                onClick={handleExportExcel}
+              >
+                {exporting ? t('recordsList.exporting') : t('recordsList.export')}
+              </Button>
             )}
+            <Button as={Link} to="/records/new" icon="plus">{t('recordsList.add')}</Button>
           </>
         )}
-      </div>
-    </div>
+      />
+
+      {/* Фильтры: поиск занимает две колонки сетки и не сжимается в «квадрат» */}
+      <FilterBar>
+        <Field label={t('recordsList.filters.search')} className="sm:col-span-2">
+          <SearchInput
+            value={search}
+            placeholder={t('recordsList.filters.searchPlaceholder')}
+            title={t('records.searchPlaceholderFull')}
+            onChange={(e) => {
+              setSearch(e.target.value)
+              setPage(0)
+            }}
+          />
+        </Field>
+        <Field label={t('recordsList.filters.year')}>
+          <Select
+            value={filterYear}
+            placeholder={t('records.allYears')}
+            options={academicYears.map((y) => ({ value: y, label: y }))}
+            onChange={(e) => {
+              setFilterYear(e.target.value)
+              setPage(0)
+            }}
+          />
+        </Field>
+        <Field label={t('recordsList.filters.faculty')}>
+          <Select
+            value={filterFaculty}
+            placeholder={t('dashboard.allFaculties')}
+            options={faculties.map((facultyName) => ({ value: facultyName, label: facultyName }))}
+            onChange={(e) => {
+              setFilterFaculty(e.target.value)
+              setFilterOp('')
+              setPage(0)
+            }}
+          />
+        </Field>
+        <Field label={t('recordsList.filters.op')}>
+          <Select
+            value={filterOp}
+            placeholder={t('records.allOps')}
+            options={opOptions.map((opValue) => ({ value: opValue, label: opValue }))}
+            onChange={(e) => {
+              setFilterOp(e.target.value)
+              setPage(0)
+            }}
+          />
+        </Field>
+        <Field label={t('recordsList.filters.status')}>
+          <Select
+            value={filterStatus}
+            placeholder={t('records.allStatuses')}
+            options={statusOptions}
+            onChange={(e) => {
+              setFilterStatus(e.target.value)
+              setPage(0)
+            }}
+          />
+        </Field>
+      </FilterBar>
+
+      {/* Ошибка загрузки заменяет таблицу, как и раньше; закрыв сообщение, можно вернуться к списку */}
+      {error ? (
+        <Alert tone="danger" onClose={() => setError('')} closeLabel={t('ui.close')}>{error}</Alert>
+      ) : (
+        <Card className="overflow-hidden">
+          <DataTable
+            columns={columns}
+            rows={items}
+            loading={loading}
+            skeletonRows={Math.min(pageSize, 8)}
+            caption={t('recordsList.tableCaption')}
+            onRowClick={(r) => navigate(`/records/${r.id}`)}
+            maxHeight="70vh"
+            empty={emptyState}
+          />
+          {!loading && total > 0 && (
+            <Pagination
+              className="border-t border-line px-4 py-3 sm:px-5"
+              page={page + 1}
+              pageCount={totalPages}
+              onPageChange={(p) => goToPage(p - 1)}
+              total={total}
+              pageSize={pageSize}
+              pageSizeOptions={PAGE_SIZE_OPTIONS}
+              onPageSizeChange={(size) => {
+                setPageSize(size)
+                setPage(0)
+              }}
+            />
+          )}
+        </Card>
+      )}
+    </PageStack>
   )
 }

@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { getLdapUsers } from '../services/api'
-import Spinner from '../components/Spinner'
+import {
+  Alert, Card, CardHeader, DataTable, EmptyState, Field, FilterBar, PageHeader, PageStack, Pagination,
+  SearchInput, TruncatedText,
+} from '../components/ui'
 
 const PAGE_SIZE = 50
 
@@ -48,117 +51,84 @@ export default function LdapUsersPage() {
     setPage(1)
   }
 
-  const pageNumbers = useMemo(() => {
-    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1)
-    const pages = new Set([1, totalPages, currentPage])
-    for (let i = currentPage - 1; i <= currentPage + 1; i++) {
-      if (i >= 1 && i <= totalPages) pages.add(i)
-    }
-    return [...pages].sort((a, b) => a - b).reduce((acc, n, i, arr) => {
-      if (i > 0 && n - arr[i - 1] > 1) acc.push('...')
-      acc.push(n)
-      return acc
-    }, [])
-  }, [totalPages, currentPage])
+  const columns = [
+    {
+      key: 'username',
+      header: t('ldap.loginCol'),
+      mobile: 'title',
+      nowrap: true,
+      cell: (row) => <span className="font-medium text-fg">{row.username || '—'}</span>,
+    },
+    {
+      key: 'display_name',
+      header: t('ldap.nameCol'),
+      minWidth: '14rem',
+      cell: (row) => row.display_name || '—',
+    },
+    {
+      key: 'dn',
+      header: t('ldap.dnCol'),
+      // DN — вторичная информация: в таблице обрезается (полный текст в title) и не забирает
+      // всю ширину; на мобильной карточке переносится целиком.
+      cell: (row) => (row.dn ? (
+        <TruncatedText className="text-fg-muted md:max-w-[22rem] max-md:whitespace-normal max-md:break-all">
+          {row.dn}
+        </TruncatedText>
+      ) : <span className="text-fg-muted">—</span>),
+    },
+  ]
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t('ldap.title')}</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            {t('ldap.subtitle')}
-          </p>
-        </div>
-        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300">
-          {t('ldap.total', {count: filtered.length})}
-        </span>
-      </div>
+    <PageStack>
+      <PageHeader title={t('ldap.title')} description={t('ldap.subtitle')} />
 
-      <div className="card p-4">
-        <label className="label mb-2">{t('ldap.searchLabel')}</label>
-        <input
-          className="input"
-          placeholder={t('ldap.searchPlaceholder')}
-          value={query}
-          onChange={(e) => handleQuery(e.target.value)}
-        />
-      </div>
+      {error && <Alert tone="danger" onClose={() => setError('')} closeLabel={t('ui.close')}>{error}</Alert>}
 
-      <div className="card overflow-hidden">
-        {loading ? (
-          <div className="flex justify-center py-14"><Spinner size="lg" /></div>
-        ) : error ? (
-          <div className="text-center text-red-500 py-14">{error}</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide bg-gray-50 dark:bg-gray-800/50">
-                  <th className="px-4 py-3">{t('ldap.loginCol')}</th>
-                  <th className="px-4 py-3">{t('ldap.nameCol')}</th>
-                  <th className="px-4 py-3">{t('ldap.dnCol')}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {paginated.map((row) => (
-                  <tr key={`${row.username}-${row.dn}`} className="hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors">
-                    <td className="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">{row.username || '—'}</td>
-                    <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{row.display_name || '—'}</td>
-                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400 max-w-[340px] truncate" title={row.dn || ''}>{row.dn || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {filtered.length === 0 && (
-              <div className="text-center py-10 text-gray-400 space-y-2">
-                <p>{t('ldap.notFound')}</p>
-                <p className="text-xs">{t('ldap.checkSettings')}</p>
-              </div>
+      <FilterBar>
+        <Field label={t('ldap.searchLabel')}>
+          <SearchInput
+            placeholder={t('ldap.searchPlaceholder')}
+            value={query}
+            onChange={(e) => handleQuery(e.target.value)}
+          />
+        </Field>
+      </FilterBar>
+
+      {!(error && !loading && items.length === 0) && (
+        <Card>
+          <CardHeader
+            title={t('ldapPage.listTitle')}
+            description={loading ? null : t('ldap.total', { count: filtered.length })}
+          />
+          <DataTable
+            columns={columns}
+            rows={paginated}
+            rowKey={(row) => `${row.username}-${row.dn}`}
+            loading={loading}
+            caption={t('ldap.title')}
+            empty={(
+              <EmptyState
+                icon="directory"
+                title={t('ldap.notFound')}
+                description={query.trim() ? t('ui.nothingFoundHint') : t('ldap.checkSettings')}
+                compact
+              />
             )}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-800">
-                <span className="text-xs text-gray-500 dark:text-gray-400">
-                  {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filtered.length)} / {filtered.length}
-                </span>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    disabled={currentPage === 1}
-                    className="px-3 py-1.5 rounded text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    ← Prev
-                  </button>
-                  {pageNumbers.map((n, i) =>
-                    n === '...' ? (
-                      <span key={`ellipsis-${i}`} className="px-2 py-1.5 text-sm text-gray-400">…</span>
-                    ) : (
-                      <button
-                        key={n}
-                        onClick={() => setPage(n)}
-                        className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                          n === currentPage
-                            ? 'bg-primary-600 text-white'
-                            : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                        }`}
-                      >
-                        {n}
-                      </button>
-                    )
-                  )}
-                  <button
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    disabled={currentPage === totalPages}
-                    className="px-3 py-1.5 rounded text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Next →
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
+          />
+          {totalPages > 1 && (
+            <div className="border-t border-line px-4 py-3 sm:px-5">
+              {/* page и Pagination оба считают страницы с 1 */}
+              <Pagination
+                page={currentPage}
+                pageCount={totalPages}
+                onPageChange={setPage}
+                total={filtered.length}
+                pageSize={PAGE_SIZE}
+              />
+            </div>
+          )}
+        </Card>
+      )}
+    </PageStack>
   )
 }

@@ -11,8 +11,9 @@ import {
   testAiProvider,
   testLdapSettings,
 } from '../services/api'
-import { useTheme } from '../context/ThemeContext'
-import Spinner from '../components/Spinner'
+import {
+  Alert, Badge, Button, Card, CardBody, CardFooter, CardHeader, Field, FormSection, Input, PageHeader, PageStack, SkeletonText, Spinner, Switch, Textarea, cn,
+} from '../components/ui'
 
 function countGroups(faculties = []) {
   return faculties.reduce((total, faculty) => (
@@ -20,24 +21,56 @@ function countGroups(faculties = []) {
   ), 0)
 }
 
+// Модели: [ID, отображаемое имя, ключ пометки settingsPage.ai.modelTags.* или null]
 const AI_MODELS = {
   openai: [
-    ['gpt-5.6-luna', 'GPT-5.6 Luna · экономичная'],
-    ['gpt-5.6-terra', 'GPT-5.6 Terra · сбалансированная'],
-    ['gpt-5.6-sol', 'GPT-5.6 Sol · максимальное качество'],
-    ['gpt-5.4-mini', 'GPT-5.4 mini'],
-    ['gpt-5.4-nano', 'GPT-5.4 nano'],
+    ['gpt-5.6-luna', 'GPT-5.6 Luna', 'economy'],
+    ['gpt-5.6-terra', 'GPT-5.6 Terra', 'balanced'],
+    ['gpt-5.6-sol', 'GPT-5.6 Sol', 'best'],
+    ['gpt-5.4-mini', 'GPT-5.4 mini', null],
+    ['gpt-5.4-nano', 'GPT-5.4 nano', null],
   ],
   gemini: [
-    ['gemini-2.5-flash', 'Gemini 2.5 Flash · стабильная'],
-    ['gemini-2.5-pro', 'Gemini 2.5 Pro'],
-    ['gemini-3-pro-preview', 'Gemini 3 Pro · Preview'],
+    ['gemini-2.5-flash', 'Gemini 2.5 Flash', 'stable'],
+    ['gemini-2.5-pro', 'Gemini 2.5 Pro', null],
+    ['gemini-3-pro-preview', 'Gemini 3 Pro · Preview', null],
   ],
 }
 
+// Провайдеры: [ключ, название, API] — названия продуктов не переводятся
+const AI_PROVIDERS = [
+  ['openai', 'OpenAI', 'Responses API'],
+  ['gemini', 'Google Gemini', 'Gemini API'],
+]
+
+// Подписи справочников Platonus по ключу (бэкенд отдаёт подпись только по-русски)
+const CATALOG_LABEL_KEYS = {
+  tutors: 'settings.teachers',
+  faculties: 'settings.faculties',
+  specializations: 'settings.specializations',
+  groups: 'settings.groups',
+}
+
+const CATALOG_STATUS_TONES = {
+  synced: 'success',
+  outdated: 'warning',
+  unavailable: 'danger',
+  local_error: 'danger',
+}
+
+const DATE_LOCALES = { ru: 'ru-RU', kz: 'kk-KZ', en: 'en-GB' }
+
+// Примеры значений — технические строки, не переводятся
+const PLACEHOLDERS = {
+  serverUrl: 'ldaps://dc1.kaztbu.edu.kz:636',
+  baseDn: 'dc=company,dc=local',
+  bindDn: 'cn=ldap-reader,ou=service,dc=company,dc=local',
+  password: '••••••••',
+  cert: '-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----',
+}
+
 export default function SystemSettingsPage() {
-  const { t } = useTranslation()
-  const { dark, toggle } = useTheme()
+  const { t, i18n } = useTranslation()
   const [catalog, setCatalog] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -86,7 +119,7 @@ export default function SystemSettingsPage() {
     if (statusResult.status === 'fulfilled') {
       setPlatonusStatus(statusResult.value)
     } else {
-      setPlatonusError(statusResult.reason?.response?.data?.detail || 'Не удалось проверить интеграцию с Platonus')
+      setPlatonusError(statusResult.reason?.response?.data?.detail || t('settingsPage.platonus.statusError'))
     }
     setLoading(false)
   }
@@ -121,7 +154,7 @@ export default function SystemSettingsPage() {
         })
         setAiError('')
       })
-      .catch(() => setAiError('Не удалось загрузить настройки AI'))
+      .catch(() => setAiError(t('settingsPage.ai.loadError')))
       .finally(() => setAiLoading(false))
   }, [])
 
@@ -146,10 +179,10 @@ export default function SystemSettingsPage() {
     setPlatonusError('')
     try {
       const result = await syncPlatonusCatalogs()
-      setPlatonusNotice(result.message || 'Справочники Platonus синхронизированы')
+      setPlatonusNotice(result.message || t('settingsPage.platonus.synced'))
       await load()
     } catch (err) {
-      setPlatonusError(err.response?.data?.detail || 'Не удалось синхронизировать справочники Platonus')
+      setPlatonusError(err.response?.data?.detail || t('settingsPage.platonus.syncError'))
     } finally {
       setPlatonusSyncing(false)
     }
@@ -213,9 +246,9 @@ export default function SystemSettingsPage() {
         openai: { ...saved.openai, api_key: '' },
         gemini: { ...saved.gemini, api_key: '' },
       })
-      setAiNotice('Настройки AI сохранены. API-ключи хранятся только на сервере.')
+      setAiNotice(t('settingsPage.ai.saved'))
     } catch (err) {
-      setAiError(err.response?.data?.detail || 'Не удалось сохранить настройки AI')
+      setAiError(err.response?.data?.detail || t('settingsPage.ai.saveError'))
     } finally {
       setAiSaving(false)
     }
@@ -229,266 +262,312 @@ export default function SystemSettingsPage() {
       const result = await testAiProvider(provider)
       setAiNotice(`${provider === 'openai' ? 'OpenAI' : 'Gemini'}: ${result.message}`)
     } catch (err) {
-      setAiError(err.response?.data?.detail || 'Не удалось проверить AI-подключение')
+      setAiError(err.response?.data?.detail || t('settingsPage.ai.testError'))
     } finally {
       setAiTesting('')
     }
   }
 
+  // --- Отображение ---
+
+  const dateLocale = DATE_LOCALES[i18n.language] || 'ru-RU'
+  const modelLabel = (name, tag) => (tag ? `${name} · ${t(`settingsPage.ai.modelTags.${tag}`)}` : name)
+
+  // Состояние подключения к Platonus: бейдж + текст
+  const connection = platonusStatus
+    ? platonusStatus.connected
+      ? { tone: 'success', label: t('settingsPage.platonus.connected') }
+      : { tone: 'danger', label: t('settingsPage.platonus.disconnected') }
+    : loading
+      ? { tone: 'neutral', label: t('settingsPage.platonus.checking') }
+      : { tone: 'neutral', label: t('settingsPage.platonus.notChecked') }
+
+  const catalogItems = platonusStatus?.catalogs || [
+    { key: 'tutors', label: t('settings.teachers'), local_count: stats.teachers },
+    { key: 'faculties', label: t('settings.faculties'), local_count: stats.faculties },
+    { key: 'specializations', label: t('settings.specializations'), local_count: stats.specializations },
+    { key: 'groups', label: t('settings.groups'), local_count: stats.groups },
+  ]
+
+  const closeLabel = t('ui.close')
+
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t('settings.title')}</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('settings.subtitle')}</p>
-      </div>
+    <PageStack>
+      <PageHeader title={t('nav.settings')} description={t('settingsPage.description')} />
 
-      <div className="card p-5 flex items-center justify-between gap-4">
-        <div>
-          <h2 className="font-semibold text-gray-900 dark:text-gray-100">{t('settings.theme')}</h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('settings.currentTheme')} {dark ? t('settings.dark') : t('settings.light')}</p>
-        </div>
-        <button className="btn-secondary" onClick={toggle}>
-          {t('settings.switchTheme')}
-        </button>
-      </div>
-
-      <div className="card p-5">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="font-semibold text-gray-900 dark:text-gray-100">Интеграция с Platonus</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Доступность подключения и состояние синхронизации справочников</p>
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <button className="btn-secondary" onClick={load} disabled={loading || platonusSyncing}>
-              {loading ? 'Проверка...' : 'Проверить подключение'}
-            </button>
-            <button
-              className="btn-primary"
-              onClick={handlePlatonusSync}
-              disabled={loading || platonusSyncing || !platonusStatus?.connected}
-              title={!platonusStatus?.connected ? 'Сначала установите подключение к Platonus' : undefined}
-            >
-              {platonusSyncing && <Spinner size="sm" />}
-              {platonusSyncing ? 'Синхронизация...' : 'Синхронизировать'}
-            </button>
-          </div>
-        </div>
-
-        {platonusStatus && (
-          <div className={`mt-4 flex flex-col gap-3 rounded-2xl border p-4 sm:flex-row sm:items-center sm:justify-between ${platonusStatus.connected ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/30' : 'border-rose-200 bg-rose-50 dark:border-rose-900 dark:bg-rose-950/30'}`}>
-            <div className="flex items-center gap-3">
-              <span className={`h-3 w-3 shrink-0 rounded-full ${platonusStatus.connected ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-              <div>
-                <p className={`font-bold ${platonusStatus.connected ? 'text-emerald-800 dark:text-emerald-300' : 'text-rose-800 dark:text-rose-300'}`}>{platonusStatus.connected ? 'Platonus подключён' : 'Platonus недоступен'}</p>
-                <p className="text-sm text-gray-600 dark:text-gray-300">{platonusStatus.message}</p>
-              </div>
+      {/* Интеграция с Platonus */}
+      <Card>
+        <CardHeader title={t('settingsPage.platonus.title')} description={t('settingsPage.platonus.description')} />
+        <CardBody className="flex flex-col gap-4">
+          <div className="flex min-w-0 flex-col gap-3 rounded-md border border-line p-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0 flex-1">
+              <Badge tone={connection.tone} dot>{connection.label}</Badge>
+              {platonusStatus?.message && <p className="mt-2 text-sm text-fg-muted">{platonusStatus.message}</p>}
             </div>
-            <div className="text-xs text-gray-500 sm:text-right">
-              <p>База: {platonusStatus.database}</p>
-              <p>Проверено: {new Date(platonusStatus.checked_at).toLocaleString('ru-RU')} · {platonusStatus.response_ms} мс</p>
-            </div>
+            {platonusStatus && (
+              <dl className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+                <dt className="text-fg-subtle">{t('settingsPage.platonus.database')}</dt>
+                <dd className="min-w-0 break-all text-fg">{platonusStatus.database || '—'}</dd>
+                <dt className="text-fg-subtle">{t('settingsPage.platonus.checkedAt')}</dt>
+                <dd className="min-w-0 tabular text-fg">{new Date(platonusStatus.checked_at).toLocaleString(dateLocale)}</dd>
+                <dt className="text-fg-subtle">{t('settingsPage.platonus.responseTime')}</dt>
+                <dd className="min-w-0 tabular text-fg">{t('settingsPage.platonus.ms', { value: platonusStatus.response_ms })}</dd>
+              </dl>
+            )}
           </div>
-        )}
 
-        {platonusError && <p className="mt-4 text-sm text-red-500">{platonusError}</p>}
-        {platonusNotice && <p className="mt-4 text-sm font-medium text-emerald-600 dark:text-emerald-400" role="status">{platonusNotice}</p>}
-        {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
+          {platonusError && <Alert tone="danger" closeLabel={closeLabel} onClose={() => setPlatonusError('')}>{platonusError}</Alert>}
+          {platonusNotice && <Alert tone="success" closeLabel={closeLabel} onClose={() => setPlatonusNotice('')}>{platonusNotice}</Alert>}
+          {error && <Alert tone="danger">{error}</Alert>}
 
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {(platonusStatus?.catalogs || [
-            { key: 'tutors', label: t('settings.teachers'), local_count: stats.teachers },
-            { key: 'faculties', label: t('settings.faculties'), local_count: stats.faculties },
-            { key: 'specializations', label: t('settings.specializations'), local_count: stats.specializations },
-            { key: 'groups', label: t('settings.groups'), local_count: stats.groups },
-          ]).map((item) => {
-            const labels = {
-              synced: ['Синхронизировано', 'text-emerald-600'],
-              outdated: ['Требуется обновление', 'text-amber-600'],
-              unavailable: ['Platonus недоступен', 'text-rose-500'],
-              local_error: ['Ошибка локальной базы', 'text-rose-500'],
-            }
-            const [statusLabel, statusClass] = labels[item.status] || ['Ожидание проверки', 'text-gray-400']
-            return (
-              <div key={item.key} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">{item.label}</p>
-                  {loading && <Spinner size="sm" />}
-                </div>
-                <p className="mt-2 text-xl font-bold text-gray-900 dark:text-white">{item.local_count ?? '—'} <span className="text-xs font-normal text-gray-400">локально</span></p>
-                {item.remote_count !== null && item.remote_count !== undefined && <p className="text-sm text-gray-500">{item.remote_count} в Platonus</p>}
-                <p className={`mt-2 text-xs font-semibold ${statusClass}`}>{statusLabel}</p>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
-      <div className="card p-5 space-y-5">
-        <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="font-semibold text-gray-900 dark:text-gray-100">AI для улучшения текста</h2>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Настройте OpenAI или Gemini для описания нарушений. Одновременно используется выбранный активный провайдер.</p>
-          </div>
-          {aiLoading && <Spinner size="sm" />}
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {[
-            ['openai', 'OpenAI', 'Responses API'],
-            ['gemini', 'Google Gemini', 'Gemini API'],
-          ].map(([provider, title, subtitle]) => {
-            const settings = ai[provider]
-            const isActive = ai.active_provider === provider
-            return (
-              <div key={provider} className={`rounded-2xl border-2 p-4 transition-colors ${isActive ? 'border-indigo-500 bg-indigo-50/60 dark:bg-indigo-950/20' : 'border-gray-200 dark:border-gray-700'}`}>
-                <div className="flex items-start justify-between gap-3">
-                  <button type="button" onClick={() => setAi((current) => ({ ...current, active_provider: provider }))} className="text-left">
-                    <span className="block font-bold text-gray-900 dark:text-white">{title}</span>
-                    <span className="text-xs text-gray-500">{subtitle} · {isActive ? 'выбран' : 'выбрать'}</span>
-                  </button>
-                  <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200">
-                    <input type="checkbox" checked={settings.enabled} onChange={(e) => updateAiProvider(provider, { enabled: e.target.checked })} className="h-4 w-4 accent-indigo-600" />
-                    Включён
-                  </label>
-                </div>
-                <div className="mt-4 space-y-3">
-                  <div>
-                    <label className="label">Модель</label>
-                    <input
-                      className="input"
-                      list={`${provider}-models`}
-                      value={settings.model}
-                      onChange={(e) => updateAiProvider(provider, { model: e.target.value })}
-                      placeholder="Выберите или введите ID модели"
-                    />
-                    <datalist id={`${provider}-models`}>
-                      {AI_MODELS[provider].map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-                    </datalist>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {AI_MODELS[provider].map(([id, label]) => (
-                        <button
-                          key={id}
-                          type="button"
-                          title={label}
-                          onClick={() => updateAiProvider(provider, { model: id })}
-                          className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors ${settings.model === id ? 'border-indigo-500 bg-indigo-600 text-white' : 'border-gray-200 bg-white text-gray-600 hover:border-indigo-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'}`}
-                        >
-                          {id}
-                        </button>
-                      ))}
+            <h3 className="mb-3 text-sm font-semibold text-fg">{t('settingsPage.platonus.catalogsTitle')}</h3>
+            <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {catalogItems.map((item) => {
+                const statusKey = CATALOG_STATUS_TONES[item.status] ? item.status : 'pending'
+                const label = CATALOG_LABEL_KEYS[item.key] ? t(CATALOG_LABEL_KEYS[item.key]) : item.label
+                return (
+                  <div key={item.key} className="flex min-w-0 flex-col gap-2 rounded-md border border-line bg-surface-muted p-3">
+                    <div className="flex min-w-0 items-start justify-between gap-2">
+                      <p className="min-w-0 text-sm font-medium text-fg-muted">{label}</p>
+                      {loading && <Spinner size={16} className="text-fg-subtle" />}
                     </div>
-                    <p className="mt-1 text-xs text-gray-400">Выберите модель из списка или вручную введите её ID.</p>
+                    <p className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
+                      <span className="text-2xl font-semibold tabular text-fg">{item.local_count ?? '—'}</span>
+                      <span className="text-xs text-fg-subtle">{t('settingsPage.platonus.local')}</span>
+                    </p>
+                    {item.remote_count !== null && item.remote_count !== undefined && (
+                      <p className="text-sm tabular text-fg-muted">{t('settingsPage.platonus.remote', { count: item.remote_count })}</p>
+                    )}
+                    <Badge tone={CATALOG_STATUS_TONES[statusKey] || 'neutral'} className="self-start">
+                      {t(`settingsPage.platonus.catalogStatus.${statusKey}`)}
+                    </Badge>
                   </div>
-                  <div>
-                    <label className="label">API-ключ</label>
-                    <input
-                      className="input"
-                      type="password"
-                      autoComplete="new-password"
-                      placeholder={settings.api_key_configured ? 'Ключ сохранён · введите новый для замены' : 'Введите API-ключ'}
-                      value={settings.api_key}
-                      onChange={(e) => updateAiProvider(provider, { api_key: e.target.value })}
-                    />
-                    <p className="mt-1 text-xs text-gray-400">{settings.api_key_configured ? '✓ Ключ настроен на сервере' : 'Ключ ещё не настроен'}</p>
-                  </div>
-                  <button type="button" className="btn-secondary w-full" disabled={aiTesting || aiSaving || aiLoading || !settings.enabled || !settings.api_key_configured} onClick={() => handleTestAi(provider)}>
-                    {aiTesting === provider ? 'Проверка...' : 'Проверить подключение'}
-                  </button>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-
-        {aiError && <p className="text-sm text-red-500">{aiError}</p>}
-        {aiNotice && <p className="text-sm text-green-600 dark:text-green-400">{aiNotice}</p>}
-        <div className="flex justify-end">
-          <button className="btn-primary" onClick={handleSaveAi} disabled={aiSaving || aiLoading}>
-            {aiSaving ? 'Сохранение...' : 'Сохранить настройки AI'}
-          </button>
-        </div>
-      </div>
-
-      <div className="card p-5 space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="font-semibold text-gray-900 dark:text-gray-100">{t('settings.ldapTitle')}</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('settings.ldapSubtitle')}</p>
+                )
+              })}
+            </div>
           </div>
-          {ldapLoading && <Spinner size="sm" />}
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="sm:col-span-2">
-            <label className="label">{t('settings.serverUrl')}</label>
-            <input
-              className="input"
-              placeholder="ldaps://dc1.kaztbu.edu.kz:636"
-              value={ldap.server_url}
-              onChange={(e) => updateLdap({ server_url: e.target.value })}
-            />
-          </div>
-
-          <div className="sm:col-span-2">
-            <label className="label">{t('settings.baseDn')}</label>
-            <input
-              className="input"
-              placeholder="dc=company,dc=local"
-              value={ldap.base_dn}
-              onChange={(e) => updateLdap({ base_dn: e.target.value })}
-            />
-          </div>
-
-          <div className="sm:col-span-2">
-            <label className="label">{t('settings.bindDn')}</label>
-            <input
-              className="input"
-              placeholder="cn=ldap-reader,ou=service,dc=company,dc=local"
-              value={ldap.bind_dn}
-              onChange={(e) => updateLdap({ bind_dn: e.target.value })}
-            />
-          </div>
-
-          <div className="sm:col-span-2">
-            <label className="label">{t('settings.bindPassword')}</label>
-            <input
-              className="input"
-              type="password"
-              placeholder="••••••••"
-              value={ldap.bind_password}
-              onChange={(e) => updateLdap({ bind_password: e.target.value })}
-            />
-          </div>
-
-          <div className="sm:col-span-2">
-            <label className="label">{t('settings.certKey')}</label>
-            <textarea
-              className="input min-h-[120px]"
-              placeholder="-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
-              value={ldap.certificate_key}
-              onChange={(e) => updateLdap({ certificate_key: e.target.value })}
-            />
-          </div>
-        </div>
-
-        {ldapError && <p className="text-sm text-red-500">{ldapError}</p>}
-        {ldapNotice && <p className="text-sm text-green-600 dark:text-green-400">{ldapNotice}</p>}
-        {ldapTestError && <p className="text-sm text-red-500">{ldapTestError}</p>}
-        {ldapTestNotice && <p className="text-sm text-green-600 dark:text-green-400">{ldapTestNotice}</p>}
-
-        <div className="flex justify-end gap-2">
-          <button
-            className="btn-secondary"
-            onClick={handleTestLdap}
-            disabled={ldapTesting || ldapSaving || ldapLoading}
+        </CardBody>
+        <CardFooter>
+          <Button variant="secondary" icon="refresh" onClick={load} loading={loading} disabled={loading || platonusSyncing}>
+            {loading ? t('settingsPage.platonus.checking') : t('settingsPage.platonus.check')}
+          </Button>
+          <Button
+            onClick={handlePlatonusSync}
+            loading={platonusSyncing}
+            disabled={loading || platonusSyncing || !platonusStatus?.connected}
+            title={!platonusStatus?.connected ? t('settingsPage.platonus.syncNeedsConnection') : undefined}
           >
+            {platonusSyncing ? t('settingsPage.platonus.syncing') : t('settingsPage.platonus.sync')}
+          </Button>
+        </CardFooter>
+      </Card>
+
+      {/* AI-провайдеры */}
+      <Card>
+        <CardHeader title={t('settingsPage.ai.title')} description={t('settingsPage.ai.description')} />
+        <CardBody className="flex flex-col gap-4">
+          {aiLoading ? (
+            <div className="grid min-w-0 gap-4 lg:grid-cols-2" aria-busy="true">
+              <SkeletonText lines={5} className="rounded-lg border border-line p-4" />
+              <SkeletonText lines={5} className="rounded-lg border border-line p-4" />
+            </div>
+          ) : (
+            <div role="radiogroup" aria-label={t('settingsPage.ai.providerGroup')} className="grid min-w-0 gap-4 lg:grid-cols-2">
+              {AI_PROVIDERS.map(([provider, title, subtitle]) => {
+                const settings = ai[provider]
+                const isActive = ai.active_provider === provider
+                const canTest = settings.enabled && settings.api_key_configured
+                return (
+                  <div
+                    key={provider}
+                    className={cn(
+                      'flex min-w-0 flex-col rounded-lg border bg-surface transition-colors',
+                      isActive ? 'border-primary ring-1 ring-primary' : 'border-line',
+                    )}
+                  >
+                    <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={isActive}
+                        onClick={() => setAi((current) => ({ ...current, active_provider: provider }))}
+                        className="flex min-h-10 min-w-0 flex-1 basis-44 cursor-pointer items-center gap-3 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                      >
+                        <span aria-hidden="true" className={cn('grid h-5 w-5 shrink-0 place-items-center rounded-full border-2', isActive ? 'border-primary' : 'border-line-strong')}>
+                          {isActive && <span className="h-2.5 w-2.5 rounded-full bg-primary" />}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block font-semibold text-fg">{title}</span>
+                          <span className="block text-xs text-fg-subtle">{subtitle}</span>
+                        </span>
+                      </button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {isActive && <Badge tone="primary">{t('settingsPage.ai.active')}</Badge>}
+                        <Switch
+                          checked={settings.enabled}
+                          onChange={(enabled) => updateAiProvider(provider, { enabled })}
+                          label={t('settingsPage.ai.enabled')}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex min-w-0 flex-1 flex-col gap-4 p-4">
+                      <Field label={t('settingsPage.ai.model')} hint={t('settingsPage.ai.modelHint')}>
+                        <Input
+                          list={`${provider}-models`}
+                          value={settings.model}
+                          onChange={(e) => updateAiProvider(provider, { model: e.target.value })}
+                          placeholder={t('settingsPage.ai.modelPlaceholder')}
+                          autoComplete="off"
+                        />
+                        <datalist id={`${provider}-models`}>
+                          {AI_MODELS[provider].map(([id, name, tag]) => <option key={id} value={id}>{modelLabel(name, tag)}</option>)}
+                        </datalist>
+                        <div role="group" aria-label={t('settingsPage.ai.modelChips')} className="flex min-w-0 flex-wrap gap-2">
+                          {AI_MODELS[provider].map(([id, name, tag]) => {
+                            const selected = settings.model === id
+                            return (
+                              <button
+                                key={id}
+                                type="button"
+                                title={modelLabel(name, tag)}
+                                aria-pressed={selected}
+                                onClick={() => updateAiProvider(provider, { model: id })}
+                                className={cn(
+                                  'inline-flex min-h-8 max-w-full cursor-pointer items-center rounded-md border px-3 py-1 text-xs font-medium transition-colors',
+                                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1 focus-visible:ring-offset-surface',
+                                  selected ? 'border-primary bg-primary text-primary-on' : 'border-line-strong bg-surface text-fg-muted hover:bg-surface-hover hover:text-fg',
+                                )}
+                              >
+                                <span className="min-w-0 break-all">{id}</span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </Field>
+
+                      <Field
+                        label={t('settingsPage.ai.apiKey')}
+                        hint={settings.api_key_configured ? t('settingsPage.ai.keyConfiguredHint') : t('settingsPage.ai.keyMissingHint')}
+                        labelAction={(
+                          <Badge tone={settings.api_key_configured ? 'success' : 'neutral'} icon={settings.api_key_configured ? 'check' : undefined}>
+                            {settings.api_key_configured ? t('settingsPage.ai.keyConfigured') : t('settingsPage.ai.keyMissing')}
+                          </Badge>
+                        )}
+                      >
+                        <Input
+                          type="password"
+                          autoComplete="new-password"
+                          placeholder={settings.api_key_configured ? t('settingsPage.ai.apiKeyReplacePlaceholder') : t('settingsPage.ai.apiKeyPlaceholder')}
+                          value={settings.api_key}
+                          onChange={(e) => updateAiProvider(provider, { api_key: e.target.value })}
+                        />
+                      </Field>
+
+                      <Button
+                        variant="secondary"
+                        block
+                        className="mt-auto"
+                        icon="link"
+                        loading={aiTesting === provider}
+                        disabled={Boolean(aiTesting) || aiSaving || aiLoading || !canTest}
+                        title={!canTest ? t('settingsPage.ai.testUnavailable') : undefined}
+                        onClick={() => handleTestAi(provider)}
+                      >
+                        {aiTesting === provider ? t('settingsPage.ai.testing') : t('settingsPage.ai.test')}
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {aiError && <Alert tone="danger" closeLabel={closeLabel} onClose={() => setAiError('')}>{aiError}</Alert>}
+          {aiNotice && <Alert tone="success" closeLabel={closeLabel} onClose={() => setAiNotice('')}>{aiNotice}</Alert>}
+        </CardBody>
+        <CardFooter>
+          <Button onClick={handleSaveAi} loading={aiSaving} disabled={aiSaving || aiLoading}>
+            {aiSaving ? t('settingsPage.ai.saving') : t('settingsPage.ai.save')}
+          </Button>
+        </CardFooter>
+      </Card>
+
+      {/* LDAP */}
+      <Card>
+        <CardHeader title={t('settings.ldapTitle')} description={t('settings.ldapSubtitle')} />
+        <CardBody className="flex flex-col gap-4">
+          {ldapLoading ? (
+            <div role="status" aria-busy="true" aria-label={t('settingsPage.ldap.loading')}>
+              <SkeletonText lines={6} />
+            </div>
+          ) : (
+            <FormSection>
+              <Field label={t('settings.serverUrl')} className="sm:col-span-2">
+                <Input
+                  placeholder={PLACEHOLDERS.serverUrl}
+                  value={ldap.server_url}
+                  onChange={(e) => updateLdap({ server_url: e.target.value })}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </Field>
+              <Field label={t('settings.baseDn')} className="sm:col-span-2">
+                <Input
+                  placeholder={PLACEHOLDERS.baseDn}
+                  value={ldap.base_dn}
+                  onChange={(e) => updateLdap({ base_dn: e.target.value })}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </Field>
+              <Field label={t('settings.bindDn')} className="sm:col-span-2">
+                <Input
+                  placeholder={PLACEHOLDERS.bindDn}
+                  value={ldap.bind_dn}
+                  onChange={(e) => updateLdap({ bind_dn: e.target.value })}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </Field>
+              <Field label={t('settings.bindPassword')} className="sm:col-span-2">
+                <Input
+                  type="password"
+                  placeholder={PLACEHOLDERS.password}
+                  value={ldap.bind_password}
+                  onChange={(e) => updateLdap({ bind_password: e.target.value })}
+                  autoComplete="new-password"
+                />
+              </Field>
+              <Field label={t('settings.certKey')} className="sm:col-span-2">
+                <Textarea
+                  className="break-all font-mono text-xs"
+                  rows={4}
+                  maxRows={40}
+                  placeholder={PLACEHOLDERS.cert}
+                  value={ldap.certificate_key}
+                  onChange={(e) => updateLdap({ certificate_key: e.target.value })}
+                  spellCheck={false}
+                />
+              </Field>
+            </FormSection>
+          )}
+
+          {ldapError && <Alert tone="danger" closeLabel={closeLabel} onClose={() => setLdapError('')}>{ldapError}</Alert>}
+          {ldapNotice && <Alert tone="success" closeLabel={closeLabel} onClose={() => setLdapNotice('')}>{ldapNotice}</Alert>}
+          {ldapTestError && <Alert tone="danger" closeLabel={closeLabel} onClose={() => setLdapTestError('')}>{ldapTestError}</Alert>}
+          {ldapTestNotice && <Alert tone="success" closeLabel={closeLabel} onClose={() => setLdapTestNotice('')}>{ldapTestNotice}</Alert>}
+        </CardBody>
+        <CardFooter>
+          <Button variant="secondary" icon="link" onClick={handleTestLdap} loading={ldapTesting} disabled={ldapTesting || ldapSaving || ldapLoading}>
             {ldapTesting ? t('settings.testing') : t('settings.testBtn')}
-          </button>
-          <button className="btn-primary" onClick={handleSaveLdap} disabled={ldapSaving || ldapLoading}>
+          </Button>
+          <Button onClick={handleSaveLdap} loading={ldapSaving} disabled={ldapSaving || ldapLoading}>
             {ldapSaving ? t('settings.saving') : t('settings.saveBtn')}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </CardFooter>
+      </Card>
+    </PageStack>
   )
 }

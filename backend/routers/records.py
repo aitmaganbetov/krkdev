@@ -41,28 +41,31 @@ def _is_owner(submitted_by: Optional[str], username: str) -> bool:
 def get_record_filter_options(
     db: Session = Depends(get_db),
     _: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
+    academic_year: Optional[str] = Query(None),
 ):
-    return record_service.get_record_filter_options(db)
+    return record_service.get_record_filter_options(db, academic_year=academic_year)
 
 
 @router.get("/dashboard/faculty-comparison")
 def get_faculty_comparison(
     faculty: Optional[str] = Query(None),
     op: Optional[str] = Query(None),
+    academic_year: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
 ):
-    return record_service.get_faculty_comparison(db, faculty=faculty, op=op)
+    return record_service.get_faculty_comparison(db, faculty=faculty, op=op, academic_year=academic_year)
 
 
 @router.get("/dashboard", response_model=DashboardStats)
 def dashboard(
     faculty: Optional[str] = Query(None),
     op: Optional[str] = Query(None),
+    academic_year: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
 ):
-    return record_service.get_dashboard_stats(db, faculty=faculty, op=op)
+    return record_service.get_dashboard_stats(db, faculty=faculty, op=op, academic_year=academic_year)
 
 
 @router.get("", response_model=RecordListOut)

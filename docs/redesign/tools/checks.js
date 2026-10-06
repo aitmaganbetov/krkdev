@@ -95,16 +95,21 @@
     const L = Math.max(r.left, c.L), T = Math.max(r.top, c.T), R = Math.min(r.right, c.R), B = Math.min(r.bottom, c.B)
     return R - L > TOL && B - T > TOL ? { left: L, top: T, right: R, bottom: B } : null
   }
-  // Which element is actually painted on top at a point (to skip text hidden under an opaque layer, e.g. modal backdrop).
-  const topmostIs = (el, x, y) => {
-    const h = document.elementFromPoint(x, y)
-    return h && (h === el || el.contains(h) || h.contains(el))
-  }
-
   const layerCache = new Map()
   const layerOf = (el) => {
     if (!layerCache.has(el)) layerCache.set(el, inFixedLayer(el))
     return layerCache.get(el)
+  }
+  const stickyCache = new Map()
+  const stickyOf = (el) => {
+    if (!stickyCache.has(el)) {
+      let found = null
+      for (let n = el; n && n !== document.body; n = n.parentElement) {
+        if (getComputedStyle(n).position === 'sticky') { found = n; break }
+      }
+      stickyCache.set(el, found)
+    }
+    return stickyCache.get(el)
   }
   const vis = textBoxes.map((b) => ({ ...b, v: visiblePart(b.el, b.r) })).filter((b) => b.v)
   for (let i = 0; i < vis.length; i++) {
@@ -112,6 +117,9 @@
       const a = vis[i], b = vis[j]
       if (a.el === b.el || a.el.contains(b.el) || b.el.contains(a.el)) continue
       if (layerOf(a.el) !== layerOf(b.el)) continue // text under a modal backdrop is not a collision
+      // Липкие элементы (закреплённая колонка/шапка таблицы, панель сохранения) намеренно перекрывают
+      // прокручиваемое содержимое непрозрачным фоном — это не наложение текста.
+      if (stickyOf(a.el) !== stickyOf(b.el)) continue
       const ox = Math.min(a.v.right, b.v.right) - Math.max(a.v.left, b.v.left)
       const oy = Math.min(a.v.bottom, b.v.bottom) - Math.max(a.v.top, b.v.top)
       if (ox > TOL && oy > TOL) {
@@ -185,13 +193,17 @@
     const need = c.measureText(label).width
     const avail = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
     if (need > avail + 2) {
+      if (el.title && el.title.trim()) { // полный текст или пояснение доступны в подсказке
+        issues.push({ type: 'ellipsis-with-title', selector: sel(el), text: label.slice(0, 60), size: `need ${Math.round(need)}px / avail ${Math.round(avail)}px` })
+        continue
+      }
       issues.push({ type: 'control-text-clipped', selector: sel(el), text: label.slice(0, 60), size: `need ${Math.round(need)}px / avail ${Math.round(avail)}px` })
     }
   }
 
   // 2d. Textareas whose text is cut mid-line (fixed rows, no auto-grow)
   for (const el of document.querySelectorAll('textarea')) {
-    if (!isVisible(el) || !el.value) continue
+    if (!isVisible(el) || !el.value || el.dataset.capped === 'true') continue // намеренный предел высоты со скроллом
     if (el.scrollHeight > el.clientHeight + 3) {
       issues.push({ type: 'textarea-content-hidden', selector: sel(el), text: el.value.slice(0, 60), size: `content ${el.scrollHeight}px / visible ${el.clientHeight}px` })
     }
@@ -273,7 +285,11 @@
   if (vw < 768) {
     for (const el of document.querySelectorAll('button, a[href], [role=button], input, select')) {
       if (!isVisible(el)) continue
-      const r = el.getBoundingClientRect()
+      // Поле внутри <label> (или связанное через for) нажимается вместе с подписью — меряем подпись
+      const lbl = el.closest('label') || (el.id && document.querySelector(`label[for="${el.id}"]`))
+      const re_ = el.getBoundingClientRect()
+      const rl = lbl ? lbl.getBoundingClientRect() : re_
+      const r = { width: Math.max(re_.width, rl.width), height: Math.max(re_.height, rl.height) }
       if (r.height < 32 || r.width < 32) issues.push({ type: 'small-tap-target', selector: sel(el), text: txt(el) || el.getAttribute('aria-label') || '', size: `${Math.round(r.width)}x${Math.round(r.height)}` })
     }
   }

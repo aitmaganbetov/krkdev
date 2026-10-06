@@ -45,18 +45,47 @@ def select_year(pg, label="2025-2026"):
     sel.select_option(val)
     pg.wait_for_load_state("networkidle"); pg.wait_for_timeout(800)
 
-# Extra UI states per page: (state name, action, only_for_widths or None)
+# Extra UI states per page: (state name, action(page, lang), only_for_widths or None)
+LABELS = json.loads(pathlib.Path(__file__).with_name("labels.json").read_text())
+
+def click_label(name, exact=True):
+    def act(pg, lang):
+        label = LABELS[name][lang]
+        pg.locator("button:visible", has_text=re.compile("^\\s*" + re.escape(label) + "\\s*$")).first.click(timeout=5000)
+        pg.wait_for_timeout(700)
+    return act
+
+def click_edit_user(pg, lang):
+    prefix = LABELS["usersEdit"][lang].split("{{")[0].strip()
+    suffix = LABELS["usersEdit"][lang].split("}}")[-1].strip()
+    sel = f'main button[aria-label^="{prefix}"]' if prefix else f'main button[aria-label$="{suffix}"]'
+    loc = pg.locator(sel + ":visible")
+    if not loc.count():  # мобильные карточки: кнопка с видимой подписью
+        loc = pg.locator("main button:visible", has_text=re.compile("^\\s*" + re.escape(LABELS["uiEdit"][lang]) + "\\s*$"))
+    loc.first.click(timeout=5000)
+    pg.wait_for_timeout(700)
+
+def click_tab(n):
+    def act(pg, lang):
+        pg.locator("main [role=tab]").nth(n).click(timeout=5000)
+        pg.wait_for_timeout(1000)
+    return act
+
+def open_menu(pg, lang):
+    pg.locator("header button[aria-controls=mobile-nav]").click(timeout=5000)
+    pg.wait_for_timeout(500)
+
 STATES = {
-    "*": [("mobile-menu", lambda pg: (pg.get_by_role("button", name=tr("common.menu")).click(), pg.wait_for_timeout(500)), [375, 768])],
-    "records": [("with-data", select_year, None)],
-    "users": [("modal-create", lambda pg: click_text(pg, tr("users.addBtn")), None),
-              ("inline-edit", lambda pg: click_text(pg, tr("users.editBtn")), None)],
-    "rooms-settings": [("modal-room-form", lambda pg: click_text(pg, re.compile("Добавить кабинет")), None),
-                       ("modal-live", lambda pg: click_text(pg, re.compile("Смотреть Live")), None)],
-    "monitoring": [("tab-violations", lambda pg: click_text(pg, re.compile("^НАРУШЕНИЯ$", re.I)), None),
-                   ("tab-archive", lambda pg: click_text(pg, re.compile("^АРХИВ$", re.I)), None),
-                   ("tab-analytics", lambda pg: click_text(pg, re.compile("^АНАЛИТИКА$", re.I)), None),
-                   ("modal-violation", lambda pg: click_text(pg, re.compile("Зафиксировать нарушение")), None)],
+    "*": [("mobile-menu", open_menu, [375, 768])],
+    "records": [("with-data", lambda pg, lang: select_year(pg), None)],
+    "users": [("modal-create", click_label("usersAdd"), None),
+              ("inline-edit", click_edit_user, None)],
+    "rooms-settings": [("modal-room-form", click_label("roomsAdd"), None),
+                       ("modal-live", click_label("roomsLive"), None)],
+    "monitoring": [("tab-violations", click_tab(1), None),
+                   ("tab-archive", click_tab(2), None),
+                   ("tab-analytics", click_tab(3), None),
+                   ("modal-violation", click_label("monReport"), None)],
 }
 
 
@@ -109,7 +138,7 @@ def main():
                         rec = {"page": name, "state": state, "path": path, "lang": lang, "width": w}
                         try:
                             if action:
-                                action(page)
+                                action(page, lang)
                         except Exception as e:
                             rec["error"] = f"action failed: {str(e).splitlines()[0][:160]}"
                             results.append(rec); print(f"{name:20} {state:16} {lang} {w:5}  ACTION FAILED", flush=True)

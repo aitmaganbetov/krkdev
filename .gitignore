@@ -12,3 +12,6 @@ frontend/node_modules/
 frontend/dist/
 .DS_Store
 ssl/
+
+# Скриншоты аудита сняты с реальной БД (ФИО, логины сотрудников) — только локально, в git не публикуются
+docs/redesign/screenshots/

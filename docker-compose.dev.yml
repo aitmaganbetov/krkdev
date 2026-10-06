@@ -1,32 +1,62 @@
+# DEV-окружение. Прод запускается из /home/admkrk/system krk (проект systemkrk).
+# Имя проекта (krkdev) задаётся в .env через COMPOSE_PROJECT_NAME; контейнеры, сеть и том БД свои (krkdev_*),
+# чтобы dev не задевал прод.
+
 services:
   db:
+    image: mysql:8.0
+    container_name: krkdev_db
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    command: --default-authentication-plugin=mysql_native_password
+    volumes:
+      - mysql_data:/var/lib/mysql
     ports:
-      - "3307:3306"
+      - "127.0.0.1:3307:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p\"$$MYSQL_ROOT_PASSWORD\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile.dev
+    container_name: krkdev_backend
+    restart: unless-stopped
     env_file:
       - ./backend/.env
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
       - ./backend:/app
+      # backend/media используется прод-бэкендом, у dev своя копия
+      - ./backend/media_dev:/app/media
+    ports:
+      - "127.0.0.1:8001:8000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app
 
-  frontend:
+  frontend-dev:
     build:
       context: ./frontend
       dockerfile: Dockerfile.dev
-    environment:
-      VITE_API_PROXY_TARGET: http://backend:8000
+    container_name: krkdev_frontend
+    restart: unless-stopped
     volumes:
       - ./frontend:/app
       - frontend_node_modules:/app/node_modules
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    environment:
+      - VITE_API_PROXY_TARGET=http://backend:8000
+    depends_on:
+      - backend
     ports:
       - "5175:5173"
 
 volumes:
+  mysql_data:
   frontend_node_modules:

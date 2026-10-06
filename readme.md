@@ -22,8 +22,8 @@
 .
 ├── backend/
 ├── frontend/
-├── docker-compose.yml
-├── docker-compose.dev.yml
+├── docker-compose.yml       # prod
+├── docker-compose.dev.yml   # dev
 └── readme.md
 ```
 
@@ -50,50 +50,37 @@
 - Docker / Docker Compose
 - Nginx для production-сборки frontend
 
-## Быстрый запуск в Docker
+## Prod и dev на сервере
 
-Production-профиль поднимает три сервиса: `db`, `backend`, `frontend`.
-
-```bash
-docker compose up --build -d
-```
-
-Остановка:
-
-```bash
-docker compose down
-```
-
-С удалением тома БД:
-
-```bash
-docker compose down -v
-```
-
-## Адреса сервисов
-
-- Frontend: `http://localhost:5173`
-- Backend API: `http://localhost:8000`
-- Swagger UI: `http://localhost:8000/docs`
+- **Prod** (https://krk.kaztbu.edu.kz) запускается из `/home/admkrk/system krk`, проект `systemkrk`:
+  контейнеры `krk_db`, `krk_backend`, `krk_frontend`, том БД `systemkrk_mysql_data`.
+  Команда `docker compose down -v` там удалит боевую базу.
+- **Dev** — `/home/admkrk/krk dev`, проект `krkdev`. Локальный `.env` (не в git) задаёт
+  `COMPOSE_PROJECT_NAME=krkdev` и `COMPOSE_FILE=docker-compose.dev.yml`, поэтому `docker-compose` там работает с dev-файлом:
+  контейнеры `krkdev_db`, `krkdev_backend`, `krkdev_frontend`, своя БД (копия прода из бэкапа)
+  и своя папка `backend/media_dev`. Прод-контейнеры dev не затрагивает.
 
 ## Режим разработки
 
-Для разработки используется дополнительный compose-файл с bind mount и hot reload.
+Bind mount и hot reload для backend и frontend:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+docker-compose up --build -d
+docker-compose down          # остановка
+docker-compose down -v       # остановка с удалением dev-БД
 ```
 
 В dev-режиме доступны:
 
-- Frontend: `http://localhost:5174`
-- Backend API: `http://localhost:8000`
-- MySQL: `localhost:3307`
+- Frontend: `http://<сервер>:5175`
+- Backend API: `http://127.0.0.1:8001`
+- MySQL: `127.0.0.1:3307`
 
-Остановка dev-режима:
+Обновить dev-БД из свежего дампа прода:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+docker exec krk_db sh -c 'exec mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --databases krk_monitoring --single-transaction' \
+  | docker exec -i krkdev_db sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD"'
 ```
 
 ## Локальный запуск без Docker

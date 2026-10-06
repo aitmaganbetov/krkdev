@@ -1,43 +1,49 @@
 import { useTranslation } from 'react-i18next'
+import Icon from './ui/Icon'
+import { cn } from './ui/cn'
 
-
-
+/**
+ * Шаги мастера записи. ≥ sm — все шаги с подписями; < sm — компактно «Шаг N из 4: название»
+ * и полоса прогресса, чтобы длинные (казахские) подписи не распирали экран.
+ */
 export default function StepIndicator({ current }) {
   const { t } = useTranslation()
-  const STEPS = [t('steps.step1'), t('steps.step2'), t('steps.step3'), t('steps.step4')]
+  const steps = [t('steps.step1'), t('steps.step2'), t('steps.step3'), t('steps.step4')]
   return (
-    <ol className="flex items-center w-full mb-8">
-      {STEPS.map((label, i) => {
-        const done    = i < current
-        const active  = i === current
-        return (
-          <li key={i} className={`flex items-center ${i < STEPS.length - 1 ? 'flex-1' : ''}`}>
-            <div className="flex flex-col items-center">
-              <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-semibold border-2 transition-colors ${
-                done   ? 'bg-primary-600 border-primary-600 text-white'
-                : active ? 'border-primary-600 text-primary-600 dark:text-primary-400'
-                : 'border-gray-300 dark:border-gray-600 text-gray-400'
-              }`}>
-                {done ? (
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                  </svg>
-                ) : i + 1}
+    <nav aria-label={t('steps.label')} className="min-w-0">
+      <div className="sm:hidden">
+        <p className="text-sm font-medium text-fg">
+          <span className="text-fg-subtle">{t('steps.counter', { n: current + 1, total: steps.length })}</span>{' '}
+          {steps[current]}
+        </p>
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-hover">
+          <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${((current + 1) / steps.length) * 100}%` }} />
+        </div>
+      </div>
+      <ol className="hidden min-w-0 items-start sm:flex">
+        {steps.map((label, i) => {
+          const done = i < current
+          const active = i === current
+          return (
+            <li key={label} className={cn('flex min-w-0 items-start', i < steps.length - 1 && 'flex-1')} aria-current={active ? 'step' : undefined}>
+              <div className="flex min-w-0 flex-col items-center gap-1.5 text-center">
+                <span className={cn(
+                  'grid h-8 w-8 shrink-0 place-items-center rounded-full border-2 text-sm font-semibold tabular transition-colors',
+                  done && 'border-primary bg-primary text-primary-on',
+                  active && 'border-primary text-primary',
+                  !done && !active && 'border-line-strong text-fg-subtle',
+                )}>
+                  {done ? <Icon name="check" size={16} strokeWidth={2.5} /> : i + 1}
+                </span>
+                <span className={cn('max-w-[9rem] text-xs font-medium', active ? 'text-fg' : 'text-fg-subtle')}>{label}</span>
               </div>
-              <span className={`mt-1.5 text-xs font-medium whitespace-nowrap ${
-                active ? 'text-primary-600 dark:text-primary-400' : 'text-gray-400 dark:text-gray-500'
-              }`}>
-                {label}
-              </span>
-            </div>
-            {i < STEPS.length - 1 && (
-              <div className={`flex-1 h-0.5 mx-2 mb-5 transition-colors ${
-                done ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-700'
-              }`} />
-            )}
-          </li>
-        )
-      })}
-    </ol>
+              {i < steps.length - 1 && (
+                <div className={cn('mx-2 mt-4 h-0.5 min-w-4 flex-1 rounded-full', done ? 'bg-primary' : 'bg-line')} aria-hidden="true" />
+              )}
+            </li>
+          )
+        })}
+      </ol>
+    </nav>
   )
 }

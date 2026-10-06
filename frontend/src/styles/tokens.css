@@ -1,0 +1,137 @@
+/*
+ * Sapa design tokens — единственный источник значений для цвета, типографики, отступов, радиусов,
+ * теней и слоёв. Компоненты используют их через Tailwind (tailwind.config.js) — никаких «сырых» hex
+ * и произвольных z-index в разметке.
+ *
+ * Цвета хранятся RGB-триплетами, чтобы работали модификаторы прозрачности: bg-primary/10.
+ * Контраст (WCAG 2.1 AA) проверен для пар «текст/фон», см. docs/redesign/design-system.md.
+ */
+
+@layer base {
+  :root {
+    color-scheme: light;
+
+    /* Бренд Sapa (логотип). teal и gold — только для графики, иконок и акцентных линий: как цвет
+       текста на белом они не проходят 4.5:1 (3.7 и 2.2). Для текста — accent / warning. */
+    --brand-navy: 18 48 79;        /* #12304F */
+    --brand-teal: 0 144 176;       /* #0090B0 */
+    --brand-gold: 224 168 0;       /* #E0A800 */
+    --on-brand: 255 255 255;       /* текст на фирменной navy-панели — белый в обеих темах */
+
+    /* Поверхности */
+    --canvas: 255 255 255;         /* фон страницы — чистый белый */
+    --surface: 255 255 255;        /* карточки, модалки */
+    --surface-muted: 246 248 250;  /* сайдбар, шапки таблиц, панели фильтров  #F6F8FA */
+    --surface-hover: 238 242 246;  /* hover строк и пунктов меню               #EEF2F6 */
+    --surface-raised: 255 255 255; /* модалки, поповеры */
+
+    /* Границы */
+    --border: 221 227 234;         /* разделители, контуры карточек           #DDE3EA */
+    --border-strong: 133 147 163;  /* контуры полей ввода: 3.1:1 к белому     #8593A3 */
+
+    /* Текст */
+    --fg: 19 32 46;                /* основной  16.5:1  #13202E */
+    --fg-muted: 74 91 110;         /* вторичный  7.0:1  #4A5B6E */
+    --fg-subtle: 95 110 127;       /* подписи    5.2:1  #5F6E7F */
+    --fg-inverse: 255 255 255;
+
+    /* Основной (navy) */
+    --primary: 18 48 79;           /* #12304F, белый текст 13.4:1 */
+    --primary-hover: 27 66 104;    /* #1B4268 */
+    --primary-on: 255 255 255;
+    --primary-subtle: 232 239 246; /* #E8EFF6, navy-текст 11.6:1 */
+    --primary-subtle-fg: 18 48 79;
+
+    /* Дополнительный (teal) */
+    --accent: 0 112 138;           /* #00708A — текст/ссылки 5.7:1 */
+    --accent-subtle: 227 243 247;  /* #E3F3F7 */
+
+    /* Статусы: *-fg — текст/иконка на белом и на *-subtle (≥ 5:1), *-subtle — фон бейджа/алерта,
+       *-solid / *-on — заливка кнопки и текст на ней */
+    --success: 19 115 79;          --success-subtle: 231 244 237;  --success-solid: 19 115 79;   --success-on: 255 255 255;
+    --warning: 138 90 0;           --warning-subtle: 253 243 215;  --warning-solid: 224 168 0;   --warning-on: 19 32 46;
+    --danger: 180 35 24;           --danger-subtle: 253 236 234;   --danger-solid: 180 35 24;    --danger-on: 255 255 255;
+    --info: 0 112 138;             --info-subtle: 227 243 247;     --info-solid: 0 112 138;      --info-on: 255 255 255;
+    --neutral: 74 91 110;          --neutral-subtle: 238 242 246;  --neutral-solid: 74 91 110;   --neutral-on: 255 255 255;
+
+    /* Фокус — фирменный teal (3.7:1 к белому ≥ 3:1 для UI-элементов) */
+    --focus: 0 144 176;
+
+    /* Палитра графиков (категориальная, порядок фиксирован) */
+    --chart-1: 18 48 79;    /* navy */
+    --chart-2: 0 144 176;   /* teal */
+    --chart-3: 224 168 0;   /* gold */
+    --chart-4: 94 147 189;  /* navy-400 */
+    --chart-5: 19 115 79;   /* green */
+    --chart-6: 180 95 6;    /* amber-brown */
+
+    /* Тени — 3 уровня */
+    --shadow-1: 0 1px 2px rgb(18 48 79 / 0.06), 0 1px 3px rgb(18 48 79 / 0.05);
+    --shadow-2: 0 4px 12px rgb(18 48 79 / 0.08), 0 2px 4px rgb(18 48 79 / 0.04);
+    --shadow-3: 0 16px 40px rgb(18 48 79 / 0.16), 0 4px 12px rgb(18 48 79 / 0.08);
+
+    /* Слои (z-index) — только через эти токены */
+    --z-base: 0;
+    --z-sticky: 10;      /* липкие шапки таблиц, первая колонка */
+    --z-header: 20;      /* шапка приложения */
+    --z-sidebar: 30;     /* сайдбар */
+    --z-overlay: 40;     /* подложка drawer/модалки */
+    --z-drawer: 50;
+    --z-modal: 60;
+    --z-popover: 70;     /* dropdown, popover поверх модалки */
+    --z-toast: 80;
+    --z-tooltip: 90;
+    --z-skiplink: 100;
+
+    /* Размеры каркаса */
+    --header-h: 4rem;
+    --sidebar-w: 16.5rem;
+    --sidebar-w-collapsed: 4.5rem;
+  }
+
+  .dark {
+    color-scheme: dark;
+
+    --canvas: 11 22 35;            /* #0B1623 */
+    --surface: 17 31 48;           /* #111F30 */
+    --surface-muted: 14 26 41;     /* #0E1A29 */
+    --surface-hover: 26 43 64;     /* #1A2B40 */
+    --surface-raised: 23 42 64;    /* #172A40 */
+
+    --border: 34 54 77;            /* #22364D */
+    --border-strong: 106 125 149;  /* #6A7D95  ≥ 3:1 к surface */
+
+    --fg: 228 234 241;             /* 13.7:1 к surface */
+    --fg-muted: 167 181 197;       /*  8.0:1 */
+    --fg-subtle: 139 155 173;      /*  5.9:1 */
+    --fg-inverse: 6 18 31;
+
+    --primary: 127 196 227;        /* #7FC4E3 — светлый navy/teal для тёмной темы */
+    --primary-hover: 160 213 236;
+    --primary-on: 6 18 31;         /* 9.8:1 */
+    --primary-subtle: 22 52 80;    /* #163450 */
+    --primary-subtle-fg: 200 228 242;
+
+    --accent: 108 201 227;
+    --accent-subtle: 13 56 70;
+
+    --success: 95 211 160;         --success-subtle: 16 55 44;     --success-solid: 95 211 160;  --success-on: 6 18 31;
+    --warning: 242 193 78;         --warning-subtle: 62 47 10;     --warning-solid: 242 193 78;  --warning-on: 6 18 31;
+    --danger: 255 143 133;         --danger-subtle: 72 26 26;      --danger-solid: 255 143 133;  --danger-on: 6 18 31;
+    --info: 108 201 227;           --info-subtle: 13 56 70;        --info-solid: 108 201 227;    --info-on: 6 18 31;
+    --neutral: 167 181 197;        --neutral-subtle: 30 46 66;     --neutral-solid: 167 181 197; --neutral-on: 6 18 31;
+
+    --focus: 108 201 227;
+
+    --chart-1: 127 196 227;
+    --chart-2: 0 170 204;
+    --chart-3: 242 193 78;
+    --chart-4: 160 180 205;
+    --chart-5: 95 211 160;
+    --chart-6: 240 140 70;
+
+    --shadow-1: 0 1px 2px rgb(0 0 0 / 0.35);
+    --shadow-2: 0 4px 14px rgb(0 0 0 / 0.40);
+    --shadow-3: 0 18px 48px rgb(0 0 0 / 0.55);
+  }
+}

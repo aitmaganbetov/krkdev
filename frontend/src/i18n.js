@@ -11,6 +11,7 @@ const resources = {
         rooms: 'Настройка кабинетов',
         records: 'Записи',
         addRecord: 'Добавить запись',
+        catalogs: 'Справочник',
         users: 'Пользователи',
         ldapUsers: 'LDAP пользователи',
         settings: 'Настройка системы',
@@ -21,15 +22,16 @@ const resources = {
         collapse: 'Свернуть',
         expand: 'Развернуть',
         closeMenu: 'Закрыть меню',
-        productName: 'Комитет ректорского контроля',
-        productSubtitle: 'Система мониторинга университета',
+        productName: 'Sapa',
+        productSubtitle: 'Система ректорского контроля',
+        productOrg: 'КазУТБ им. К. Кулажанова',
         mainNavigation: 'Основная навигация',
         language: 'Язык интерфейса',
         groups: { overview: 'Обзор', workspace: 'Рабочая область', administration: 'Администрирование' },
         lightTheme: 'Светлая тема',
         darkTheme: 'Темная тема',
         logout: 'Выйти',
-        subtitle: 'KRK System',
+        subtitle: 'Sapa',
       },
       // Auth
       auth: {
@@ -58,7 +60,7 @@ const resources = {
         allStatuses: 'Все статусы',
         group: 'Группа',
         type: 'Тип',
-        score: 'Бал',
+        score: 'Балл',
         attendance: 'Посещ. %',
         savedBy: 'Сохранил/отправил',
         status: 'Статус',
@@ -79,6 +81,7 @@ const resources = {
         count_one: '{{count}} запись',
         count_few: '{{count}} записи',
         count_many: '{{count}} записей',
+        count_other: '{{count}} записи',
       },
       // Record detail
       record: {
@@ -336,7 +339,7 @@ const resources = {
       common: {
         loading: 'Загрузка...',
         error: 'Ошибка',
-        system: 'KRK Monitoring System',
+        system: 'Sapa · Система ректорского контроля',
         menu: 'Меню',
         skipToContent: 'Перейти к содержимому',
         cancel: 'Отмена',
@@ -361,6 +364,7 @@ const resources = {
         rooms: 'Кабинеттерді баптау',
         records: 'Жазбалар',
         addRecord: 'Жазба қосу',
+        catalogs: 'Анықтамалық',
         users: 'Пайдаланушылар',
         ldapUsers: 'LDAP пайдаланушылар',
         settings: 'Жүйе параметрлері',
@@ -370,15 +374,16 @@ const resources = {
         collapse: 'Жию',
         expand: 'Жазу',
         closeMenu: 'Мәзірді жабу',
-        productName: 'Ректорлық бақылау комитеті',
-        productSubtitle: 'Университет мониторингі жүйесі',
+        productName: 'Sapa',
+        productSubtitle: 'Ректорлық бақылау жүйесі',
+        productOrg: 'Қ. Құлажанов атындағы ҚазТБУ',
         mainNavigation: 'Негізгі навигация',
         language: 'Интерфейс тілі',
         groups: { overview: 'Шолу', workspace: 'Жұмыс аймағы', administration: 'Әкімшілендіру' },
         lightTheme: 'Ашық тақырып',
         darkTheme: 'Қараңғы тақырып',
         logout: 'Шығу',
-        subtitle: 'KRK Жүйесі',
+        subtitle: 'Sapa',
       },
       auth: {
         title: 'Жүйеге кіру',
@@ -426,6 +431,7 @@ const resources = {
         count_one: '{{count}} жазба',
         count_few: '{{count}} жазба',
         count_many: '{{count}} жазба',
+        count_other: '{{count}} жазба',
       },
       record: {
         back: '← Артқа',
@@ -675,7 +681,7 @@ const resources = {
       common: {
         loading: 'Жүктелуде...',
         error: 'Қате',
-        system: 'KRK Мониторинг Жүйесі',
+        system: 'Sapa · Ректорлық бақылау жүйесі',
         menu: 'Мәзір',
         skipToContent: 'Мазмұнға өту',
         cancel: 'Болдырмау',
@@ -700,6 +706,7 @@ const resources = {
         rooms: 'Room settings',
         records: 'Records',
         addRecord: 'Add Record',
+        catalogs: 'Catalogs',
         users: 'Users',
         ldapUsers: 'LDAP Users',
         settings: 'System Settings',
@@ -709,15 +716,16 @@ const resources = {
         collapse: 'Collapse',
         expand: 'Expand',
         closeMenu: 'Close menu',
-        productName: 'Rector Control Committee',
-        productSubtitle: 'University monitoring system',
+        productName: 'Sapa',
+        productSubtitle: 'Rector control system',
+        productOrg: 'KazUTB named after K. Kulazhanov',
         mainNavigation: 'Main navigation',
         language: 'Interface language',
         groups: { overview: 'Overview', workspace: 'Workspace', administration: 'Administration' },
         lightTheme: 'Light theme',
         darkTheme: 'Dark theme',
         logout: 'Logout',
-        subtitle: 'KRK System',
+        subtitle: 'Sapa',
       },
       auth: {
         title: 'Sign in',
@@ -1010,7 +1018,7 @@ const resources = {
       common: {
         loading: 'Loading...',
         error: 'Error',
-        system: 'KRK Monitoring System',
+        system: 'Sapa · Rector control system',
         menu: 'Menu',
         skipToContent: 'Skip to content',
         cancel: 'Cancel',
@@ -1027,6 +1035,40 @@ const resources = {
     },
   },
 }
+
+// Дополнительные словари по модулям: src/locales/<модуль>.js экспортирует { ru, kz, en }.
+// Ключи вливаются поверх базовых (глубокое слияние), так страницы не конфликтуют за один файл.
+const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v)
+function deepMerge(target, src) {
+  for (const [k, v] of Object.entries(src || {})) {
+    if (isObj(v)) target[k] = deepMerge(isObj(target[k]) ? target[k] : {}, v)
+    else target[k] = v
+  }
+  return target
+}
+const modules = import.meta.glob('./locales/*.js', { eager: true })
+for (const mod of Object.values(modules)) {
+  const dict = mod.default || mod
+  for (const lng of ['ru', 'kz', 'en']) {
+    if (dict[lng]) deepMerge(resources[lng].translation, dict[lng])
+  }
+}
+
+// Псевдолокализация для стресс-теста вёрстки (localStorage 'i18n-pseudo' = '1'): каждая строка
+// становится в ~2 раза длиннее и получает длинное казахское слово — так проверяется запас на +20–40%.
+function pseudoLocalize(node) {
+  for (const [k, v] of Object.entries(node)) {
+    if (isObj(v)) pseudoLocalize(v)
+    else if (typeof v === 'string' && v.trim()) {
+      node[k] = `${v} ${v.replace(/{{[^}]+}}/g, '')} Қазақстанреспубликасындағы`.replace(/\s+/g, ' ').trim()
+    }
+  }
+}
+try {
+  if (localStorage.getItem('i18n-pseudo') === '1') {
+    for (const lng of ['ru', 'kz', 'en']) pseudoLocalize(resources[lng].translation)
+  }
+} catch { /* localStorage недоступен */ }
 
 i18n
   .use(initReactI18next)

@@ -28,6 +28,9 @@ services:
     restart: unless-stopped
     env_file:
       - ./backend/.env
+    environment:
+      # Dev открывается по http: Secure-cookie браузер не сохранил бы (в prod по HTTPS — true по умолчанию)
+      - AUTH_COOKIE_SECURE=false
     depends_on:
       db:
         condition: service_healthy
@@ -52,6 +55,7 @@ services:
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
     environment:
       - VITE_API_PROXY_TARGET=http://backend:8000
+      - VITE_MONITORING_DEMO=true
     depends_on:
       - backend
     ports:

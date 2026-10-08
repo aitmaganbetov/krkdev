@@ -44,7 +44,10 @@ services:
       - "80:80"
       - "443:443"
 
+  # Vite dev-сервер в проде не нужен и не должен быть доступен снаружи:
+  # запускается только явно (docker-compose --profile dev up frontend-dev) и только на localhost
   frontend-dev:
+    profiles: ["dev"]
     build:
       context: ./frontend
       dockerfile: Dockerfile.dev
@@ -59,7 +62,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "5175:5173"
+      - "127.0.0.1:5175:5173"
 
 volumes:
   mysql_data:

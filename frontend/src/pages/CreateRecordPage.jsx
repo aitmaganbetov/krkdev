@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
-import { createRecord, getAcademicYears, getBasicInfoCatalog } from '../services/api'
+import { apiErrorText, createRecord, getAcademicYears, getBasicInfoCatalog } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import StepIndicator from '../components/StepIndicator'
 import Step1Basic    from '../components/form/Step1Basic'
@@ -73,7 +73,7 @@ export default function CreateRecordPage() {
       })
       .catch((err) => {
         setCatalog({ faculties: [], academic_years: [] })
-        setCatalogError(err.response?.data?.detail ?? t('common.loadError'))
+        setCatalogError(apiErrorText(err, t('common.loadError')))
       })
       .finally(() => setCatalogLoading(false))
   }, [])
@@ -125,7 +125,7 @@ export default function CreateRecordPage() {
       const created = await createRecord(payload)
       navigate(`/records/${created.id}`, { state: { notice: t('common.saved') } })
     } catch (err) {
-      setError(err.response?.data?.detail ?? t('common.saveError'))
+      setError(apiErrorText(err, t('common.saveError')))
       setSaving(false)
     }
   }

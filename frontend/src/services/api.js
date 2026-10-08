@@ -3,43 +3,31 @@ import axios from 'axios'
 const api = axios.create({
   baseURL: '/api',
   headers: { 'Content-Type': 'application/json' },
-  withCredentials: true,
 })
 
-// Backward compatibility: attach bearer token when backend cookie auth is not yet enabled.
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
-})
-
+// Сессия — httpOnly-cookie того же origin (nginx / Vite proxy), браузер отправляет её сам.
 // Redirect to login on 401
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
       const requestUrl = String(error.config?.url || '')
-      const isAuthProbe = requestUrl.includes('/auth/me')
+      const isAuthProbe = requestUrl.includes('/auth/me') || requestUrl.includes('/auth/logout')
       const isLoginPage = typeof window !== 'undefined' && window.location.pathname === '/login'
-      const token = localStorage.getItem('token') || ''
 
       if (!isAuthProbe && !isLoginPage && typeof window !== 'undefined') {
         fetch('/api/auth/logout', {
           method: 'POST',
           credentials: 'include',
           keepalive: true,
-          headers: {
-            'X-Logout-Reason': 'frontend_401',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
+          headers: { 'X-Logout-Reason': 'frontend_401' },
         }).catch(() => {})
       }
 
-      localStorage.removeItem('token')
-      localStorage.removeItem('username')
-      localStorage.removeItem('role')
+      try {
+        localStorage.removeItem('username')
+        localStorage.removeItem('role')
+      } catch { /* private mode */ }
 
       // Avoid infinite reload loop on /login caused by /auth/me returning 401.
       if (!isAuthProbe && !isLoginPage && typeof window !== 'undefined') {
@@ -50,12 +38,27 @@ api.interceptors.response.use(
   }
 )
 
+// Текст ошибки API для показа пользователю. FastAPI отдаёт detail строкой
+// или (422) массивом объектов { msg, loc, ... } — объект нельзя рендерить в React.
+export function apiErrorText(err, fallback) {
+  const detail = err?.response?.data?.detail
+  if (typeof detail === 'string' && detail) return detail
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => String((item && item.msg) || '').replace(/^Value error, /, ''))
+      .filter(Boolean)
+      .join('; ') || fallback
+  }
+  return fallback
+}
+
 // Auth
 export const login = (username, password) =>
   api.post('/auth/login', { username, password }).then((r) => r.data)
 
+// Таймаут: зависший запрос не должен блокировать выход из интерфейса
 export const logout = () =>
-  api.post('/auth/logout').then((r) => r.data)
+  api.post('/auth/logout', null, { timeout: 5000 }).then((r) => r.data)
 
 export const getMe = () =>
   api.get('/auth/me').then((r) => r.data)
@@ -209,6 +212,19 @@ export const deleteAcademicYear = (name) =>
 // name = null — по умолчанию снова текущий учебный год по дате
 export const setDefaultAcademicYear = (name) =>
   api.put('/academic-years/default', { name }).then((r) => r.data)
+
+// Audit logs (admin)
+export const getAuditLogs = (params) =>
+  api.get('/admin/audit-logs', { params }).then((r) => r.data)
+
+export const getAuditStats = (daysBack) =>
+  api.get('/admin/audit-logs/stats', { params: { days_back: daysBack } }).then((r) => r.data)
+
+export const getAuditActions = () =>
+  api.get('/admin/audit-logs/actions').then((r) => r.data)
+
+export const getAuditActors = () =>
+  api.get('/admin/audit-logs/actors').then((r) => r.data)
 
 // Dashboard
 export const getDashboardStats = (params) =>

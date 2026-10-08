@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
+  apiErrorText,
   createRoom,
   deleteRoom,
   getRooms,
@@ -56,7 +57,7 @@ export default function RoomsSettingsPage() {
         setRooms(data || [])
         setError('')
       })
-      .catch((err) => setError(err.response?.data?.detail || t('roomsPage.loadError')))
+      .catch((err) => setError(apiErrorText(err, t('roomsPage.loadError'))))
       .finally(() => setLoading(false))
   }
 
@@ -109,8 +110,7 @@ export default function RoomsSettingsPage() {
       setForm(EMPTY_FORM)
       loadRooms()
     } catch (err) {
-      const detail = err.response?.data?.detail
-      setError(typeof detail === 'string' ? detail : t('roomsPage.saveError'))
+      setError(apiErrorText(err, t('roomsPage.saveError')))
     } finally {
       setSaving(false)
     }
@@ -129,7 +129,7 @@ export default function RoomsSettingsPage() {
       setRooms((current) => current.filter((item) => item.id !== room.id))
       toast.success(t('roomsPage.deleted'))
     } catch (err) {
-      toast.error(err.response?.data?.detail || t('roomsPage.deleteError'))
+      toast.error(apiErrorText(err, t('roomsPage.deleteError')))
     }
   }
 
@@ -141,7 +141,7 @@ export default function RoomsSettingsPage() {
       if (result.success) toast.success(`${room.name}: ${result.message}`)
       else toast.error(`${room.name}: ${result.message}`)
     } catch (err) {
-      toast.error(err.response?.data?.detail || t('roomsPage.testError'))
+      toast.error(apiErrorText(err, t('roomsPage.testError')))
     } finally {
       setTestingId(null)
     }

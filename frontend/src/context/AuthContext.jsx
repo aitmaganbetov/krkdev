@@ -4,80 +4,56 @@ import { normalizeIdentity } from '../utils/identity'
 
 const AuthContext = createContext(null)
 
-function parseJwtPayload(token) {
-  if (!token || typeof token !== 'string') return null
+// Сессия живёт в httpOnly-cookie, JWT в браузере не хранится. В localStorage кэшируются только
+// несекретные username/role для мгновенной первой отрисовки; источник истины — GET /auth/me.
+function readCachedAuth() {
   try {
-    const part = token.split('.')[1]
-    if (!part) return null
-    const normalized = part.replace(/-/g, '+').replace(/_/g, '/')
-    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
-    return JSON.parse(atob(padded))
+    // Старые версии хранили JWT в localStorage — удаляем его.
+    localStorage.removeItem('token')
+    return {
+      currentUser: normalizeIdentity(localStorage.getItem('username') || ''),
+      role: (localStorage.getItem('role') || 'staff').toLowerCase(),
+    }
   } catch {
-    return null
+    return { currentUser: '', role: 'staff' }
   }
 }
 
-function getInitialAuthState() {
-  const token = localStorage.getItem('token') || ''
-  const storedUsername = localStorage.getItem('username') || ''
-  const storedRole = (localStorage.getItem('role') || '').toLowerCase()
-  const payload = parseJwtPayload(token)
-  const usernameFromToken = normalizeIdentity(payload?.sub)
-  const roleFromToken = String(payload?.role || '').toLowerCase().trim()
-  const currentUser = usernameFromToken || normalizeIdentity(storedUsername)
-  const role = roleFromToken || storedRole || 'staff'
-
-  if (currentUser) {
-    localStorage.setItem('username', currentUser)
-    localStorage.setItem('role', role)
-  }
-
-  return {
-    currentUser,
-    role,
-  }
+function cacheAuth(user, role) {
+  try {
+    if (user) {
+      localStorage.setItem('username', user)
+      localStorage.setItem('role', role)
+    } else {
+      localStorage.removeItem('username')
+      localStorage.removeItem('role')
+    }
+  } catch { /* private mode */ }
 }
 
 export function AuthProvider({ children }) {
-  const [initial] = useState(() => getInitialAuthState())
+  const [initial] = useState(readCachedAuth)
   const [authLoading, setAuthLoading] = useState(true)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [currentUser, setCurrentUser] = useState(initial.currentUser)
   const [role, setRole] = useState(initial.role)
+
+  const applySession = useCallback((user, nextRole) => {
+    setCurrentUser(user)
+    setRole(nextRole)
+    setIsAuthenticated(Boolean(user))
+    cacheAuth(user, nextRole)
+  }, [])
 
   useEffect(() => {
     let mounted = true
     getMeApi()
       .then((ctx) => {
         if (!mounted) return
-        const user = normalizeIdentity(ctx?.username)
-        const nextRole = String(ctx?.role || 'staff').toLowerCase()
-        setCurrentUser(user)
-        setRole(nextRole)
-        setIsAuthenticated(Boolean(user))
-        if (user) localStorage.setItem('username', user)
-        localStorage.setItem('role', nextRole)
+        applySession(normalizeIdentity(ctx?.username), String(ctx?.role || 'staff').toLowerCase())
       })
       .catch(() => {
-        if (!mounted) return
-        // Backward compatibility for backends without /auth/me cookie endpoint.
-        const token = localStorage.getItem('token') || ''
-        const payload = parseJwtPayload(token)
-        const user = normalizeIdentity(payload?.sub) || normalizeIdentity(localStorage.getItem('username') || '')
-        const nextRole = String(payload?.role || localStorage.getItem('role') || 'staff').toLowerCase()
-        if (user) {
-          setCurrentUser(user)
-          setRole(nextRole)
-          setIsAuthenticated(true)
-          localStorage.setItem('username', user)
-          localStorage.setItem('role', nextRole)
-        } else {
-          setCurrentUser('')
-          setRole('staff')
-          setIsAuthenticated(false)
-          localStorage.removeItem('username')
-          localStorage.removeItem('role')
-        }
+        if (mounted) applySession('', 'staff')
       })
       .finally(() => {
         if (mounted) setAuthLoading(false)
@@ -86,31 +62,28 @@ export function AuthProvider({ children }) {
     return () => {
       mounted = false
     }
-  }, [])
+  }, [applySession])
 
   const login = useCallback(async (username, password) => {
     const data = await loginApi(username, password)
-    const payload = parseJwtPayload(data.access_token)
-    const canonicalUser = normalizeIdentity(payload?.sub) || normalizeIdentity(username)
-    const roleFromToken = String(payload?.role || data.role || 'staff').toLowerCase()
+    let user = normalizeIdentity(username)
+    let nextRole = String(data?.role || 'staff').toLowerCase()
+    try {
+      // Каноническое имя (например, LDAP-логин без домена) и актуальная роль — из /auth/me.
+      const ctx = await getMeApi()
+      user = normalizeIdentity(ctx?.username) || user
+      nextRole = String(ctx?.role || nextRole).toLowerCase()
+    } catch { /* остаёмся на данных ответа логина */ }
+    applySession(user, nextRole)
+  }, [applySession])
 
-    localStorage.setItem('token', data.access_token)
-    localStorage.setItem('username', canonicalUser)
-    localStorage.setItem('role', roleFromToken)
-    setCurrentUser(canonicalUser)
-    setRole(roleFromToken)
-    setIsAuthenticated(true)
-  }, [])
-
-  const logout = useCallback(() => {
-    logoutApi().catch(() => {})
-    localStorage.removeItem('token')
-    localStorage.removeItem('username')
-    localStorage.removeItem('role')
-    setCurrentUser('')
-    setRole('staff')
-    setIsAuthenticated(false)
-  }, [])
+  const logout = useCallback(async () => {
+    // Сначала просим сервер сбросить cookie, затем чистим локальное состояние.
+    try {
+      await logoutApi()
+    } catch { /* сессия могла уже истечь */ }
+    applySession('', 'staff')
+  }, [applySession])
 
   const hasRole = useCallback((allowedRoles = []) => {
     const normalized = allowedRoles.map((item) => String(item || '').toLowerCase())

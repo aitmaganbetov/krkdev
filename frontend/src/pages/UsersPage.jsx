@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { blockLocalUser, createLocalUser, deleteLocalUser, getLocalUsers, unblockLocalUser, updateLocalUser, updateLocalUserRole } from '../services/api'
+import { apiErrorText, blockLocalUser, createLocalUser, deleteLocalUser, getLocalUsers, unblockLocalUser, updateLocalUser, updateLocalUserRole } from '../services/api'
 import { formatDateTimeUtcPlus5 } from '../utils/datetime'
 import {
   Alert, Badge, Button, Card, CardHeader, DataTable, EmptyState, Field, FilterBar, Input, Modal,
@@ -77,7 +77,7 @@ export default function UsersPage() {
       setNewUser({ username: '', display_name: '', password: '', role: 'staff' })
       toast.success(t('usersPage.created', { username: created?.username || newUser.username }))
     } catch (err) {
-      setError(err.response?.data?.detail || t('users.createError'))
+      setError(apiErrorText(err, t('users.createError')))
     } finally {
       setCreating(false)
     }
@@ -113,7 +113,7 @@ export default function UsersPage() {
       setUsers((prev) => prev.map((item) => (item.username === user.username ? updated : item)))
       toast.success(t(user.is_blocked ? 'usersPage.unblocked' : 'usersPage.blocked', { username: user.username }))
     } catch (err) {
-      setError(err.response?.data?.detail || (user.is_blocked ? t('users.unblockError') : t('users.blockError')))
+      setError(apiErrorText(err, user.is_blocked ? t('users.unblockError') : t('users.blockError')))
     } finally {
       setSavingBlockFor('')
     }
@@ -140,7 +140,7 @@ export default function UsersPage() {
       }
       toast.success(t('usersPage.deleted', { username: user.username }))
     } catch (err) {
-      setError(err.response?.data?.detail || t('users.deleteError'))
+      setError(apiErrorText(err, t('users.deleteError')))
     } finally {
       setDeletingUserFor('')
     }
@@ -176,7 +176,7 @@ export default function UsersPage() {
       cancelEdit()
       toast.success(t('usersPage.updated', { username }))
     } catch (err) {
-      setError(err.response?.data?.detail || t('users.updateError'))
+      setError(apiErrorText(err, t('users.updateError')))
     }
   }
 

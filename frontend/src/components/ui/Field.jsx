@@ -64,8 +64,12 @@ const SIZE = { sm: 'min-h-8 px-2.5 py-1', md: 'min-h-10 px-3 py-2', lg: 'min-h-1
 
 export const Input = forwardRef(function Input({ className, size = 'md', icon, ...props }, ref) {
   const p = useFieldProps(props)
-  // Значение или плейсхолдер, не поместившиеся в поле, доступны в подсказке
-  const hint = p.title ?? ((typeof p.value === 'string' && p.value) || (typeof p.placeholder === 'string' ? p.placeholder : undefined))
+  // Значение или плейсхолдер, не поместившиеся в поле, доступны в подсказке.
+  // Значение пароля в подсказку не попадает (иначе оно видно в tooltip и DOM), плейсхолдер — можно.
+  const placeholderHint = typeof p.placeholder === 'string' ? p.placeholder : undefined
+  const hint = p.type === 'password'
+    ? p.title ?? placeholderHint
+    : p.title ?? ((typeof p.value === 'string' && p.value) || placeholderHint)
   const input = (
     <input
       ref={ref}

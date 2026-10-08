@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { formatDateTimeUtcPlus5 } from '../utils/datetime'
+import { apiErrorText, getAuditActions, getAuditActors, getAuditLogs, getAuditStats } from '../services/api'
 import {
   Alert, Badge, Button, Card, DataTable, EmptyState, Field, FilterBar, PageHeader, PageStack,
   Pagination, Select, StatCard, TruncatedText,
@@ -48,6 +49,7 @@ const KNOWN_REASONS = [
 const ACTION_TONES = { auth: 'info', record: 'primary', admin: 'neutral' }
 
 const PERIODS = [1, 7, 30, 90]
+const PAGE_SIZE = 50
 
 export default function AuditLogsPage() {
   const { t } = useTranslation()
@@ -56,7 +58,6 @@ export default function AuditLogsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [page, setPage] = useState(0)
-  const [limit, setLimit] = useState(50)
   const [daysBack, setDaysBack] = useState(7)
   const [filterAction, setFilterAction] = useState('')
   const [filterOutcome, setFilterOutcome] = useState('')
@@ -66,92 +67,43 @@ export default function AuditLogsPage() {
   const [total, setTotal] = useState(0)
 
   useEffect(() => {
-    if (page === 0 && !logs.length) {
-      loadLogs()
-      loadStats()
-      loadFilters()
-    }
-  }, [])
+    let active = true
+    setLoading(true)
+    getAuditLogs({
+      skip: page * PAGE_SIZE,
+      limit: PAGE_SIZE,
+      days_back: daysBack,
+      action: filterAction || undefined,
+      outcome: filterOutcome || undefined,
+      actor: filterActor || undefined,
+    })
+      .then((data) => {
+        if (!active) return
+        setLogs(data.logs || [])
+        setTotal(data.total || 0)
+        setError(null)
+      })
+      .catch((err) => { if (active) setError(err) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [page, daysBack, filterAction, filterOutcome, filterActor])
 
   useEffect(() => {
-    if (logs.length > 0 || stats) {
-      loadLogs()
-    }
-  }, [page, limit, daysBack, filterAction, filterOutcome, filterActor])
+    let active = true
+    getAuditStats(daysBack)
+      .then((data) => { if (active) setStats(data) })
+      .catch(() => {})
+    return () => { active = false }
+  }, [daysBack])
 
-  const loadLogs = async () => {
-    try {
-      setLoading(true)
-      const params = new URLSearchParams({
-        skip: page * limit,
-        limit,
-        days_back: daysBack,
-      })
-      if (filterAction) params.append('action', filterAction)
-      if (filterOutcome) params.append('outcome', filterOutcome)
-      if (filterActor) params.append('actor', filterActor)
+  useEffect(() => {
+    getAuditActions().then((data) => setAllActions(data.actions || [])).catch(() => {})
+    getAuditActors().then((data) => setAllActors(data.actors || [])).catch(() => {})
+  }, [])
 
-      const response = await fetch(`/api/admin/audit-logs?${params}`, {
-        credentials: 'include',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` }
-      })
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: t('auditLog.unknownError') }))
-        const statusText = response.status === 404
-          ? t('auditLog.unavailable')
-          : errorData.detail || `HTTP ${response.status}`
-        throw new Error(statusText)
-      }
-      const data = await response.json()
-      setLogs(data.logs || [])
-      setTotal(data.total || 0)
-      setError(null)
-    } catch (err) {
-      console.error('Error loading logs:', err)
-      setError(err.message || t('common.error'))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const loadStats = async () => {
-    try {
-      const response = await fetch(`/api/admin/audit-logs/stats?days_back=${daysBack}`, {
-        credentials: 'include',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` }
-      })
-      if (!response.ok) throw new Error(t('common.error'))
-      const data = await response.json()
-      setStats(data)
-    } catch (err) {
-      console.error('Error loading stats:', err)
-    }
-  }
-
-  const loadFilters = async () => {
-    try {
-      const [actionsRes, actorsRes] = await Promise.all([
-        fetch('/api/admin/audit-logs/actions', {
-          credentials: 'include',
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` }
-        }),
-        fetch('/api/admin/audit-logs/actors', {
-          credentials: 'include',
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` }
-        })
-      ])
-      if (actionsRes.ok) {
-        const data = await actionsRes.json()
-        setAllActions(data.actions || [])
-      }
-      if (actorsRes.ok) {
-        const data = await actorsRes.json()
-        setAllActors(data.actors || [])
-      }
-    } catch (err) {
-      console.error('Error loading filters:', err)
-    }
-  }
+  const errorMessage = error
+    ? (error.response?.status === 404 ? t('auditLog.unavailable') : apiErrorText(error, t('common.error')))
+    : ''
 
   const getActionLabel = (action) => (ACTION_LABEL_KEYS[action] ? t(`auditLog.actions.${ACTION_LABEL_KEYS[action]}`) : action)
 
@@ -173,7 +125,7 @@ export default function AuditLogsPage() {
   }
 
   // Состояние страницы 0-базовое, компонент Pagination считает с 1
-  const pageCount = Math.max(1, Math.ceil(total / limit))
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   const columns = [
     {
@@ -293,9 +245,9 @@ export default function AuditLogsPage() {
         </Field>
       </FilterBar>
 
-      {error && (
+      {errorMessage && (
         <Alert tone="danger" title={t('auditLog.loadErrorTitle')}>
-          <p className="break-words">{error}</p>
+          <p className="break-words">{errorMessage}</p>
           <p className="mt-2 text-xs">{t('auditLog.checklistTitle')}</p>
           <ul className="mt-1 list-disc pl-5 text-xs">
             <li>{t('auditLog.checklist.restarted')}</li>
@@ -333,7 +285,7 @@ export default function AuditLogsPage() {
               pageCount={pageCount}
               onPageChange={(next) => setPage(next - 1)}
               total={total}
-              pageSize={limit}
+              pageSize={PAGE_SIZE}
             />
           </div>
         )}

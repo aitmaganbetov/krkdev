@@ -1,19 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { createAcademicYear, deleteAcademicYear, getAcademicYears, setDefaultAcademicYear } from '../services/api'
+import { apiErrorText, createAcademicYear, deleteAcademicYear, getAcademicYears, setDefaultAcademicYear } from '../services/api'
 import {
   Alert, Badge, Button, Card, CardHeader, DataTable, EmptyState, Field, Input, useUI,
 } from '../components/ui'
-
-function errorText(err, fallback) {
-  const detail = err.response?.data?.detail
-  if (typeof detail === 'string') return detail
-  if (Array.isArray(detail)) {
-    return detail.map((item) => String(item.msg || '').replace(/^Value error, /, '')).filter(Boolean).join('; ') || fallback
-  }
-  return fallback
-}
 
 function nextYearAfter(items) {
   const starts = items.map((item) => Number(String(item.name).slice(0, 4))).filter(Number.isFinite)
@@ -38,7 +29,7 @@ export default function AcademicYearsPage() {
       setName(nextYearAfter(data))
       setError('')
     } catch (err) {
-      setError(errorText(err, t('years.loadError')))
+      setError(apiErrorText(err, t('years.loadError')))
     } finally {
       setLoading(false)
     }
@@ -55,7 +46,7 @@ export default function AcademicYearsPage() {
       await load()
       toast.success(t('years.added', { name: created.name }))
     } catch (err) {
-      setError(errorText(err, t('years.addError')))
+      setError(apiErrorText(err, t('years.addError')))
     } finally {
       setSaving(false)
     }
@@ -72,7 +63,7 @@ export default function AcademicYearsPage() {
         ? t('years.defaultSet', { name: yearName })
         : current ? t('years.defaultAutoWith', { name: current.name }) : t('years.defaultAuto'))
     } catch (err) {
-      setError(errorText(err, t('years.defaultError')))
+      setError(apiErrorText(err, t('years.defaultError')))
     } finally {
       setSaving(false)
     }
@@ -93,7 +84,7 @@ export default function AcademicYearsPage() {
       await load()
       toast.success(t('years.deleted', { name: item.name }))
     } catch (err) {
-      setError(errorText(err, t('years.deleteError')))
+      setError(apiErrorText(err, t('years.deleteError')))
     } finally {
       setSaving(false)
     }

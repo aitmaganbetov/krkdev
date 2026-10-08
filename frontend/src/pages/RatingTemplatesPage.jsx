@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
+  apiErrorText,
   createRatingTemplate,
   deleteRatingTemplate,
   getAcademicYears,
@@ -74,15 +75,6 @@ function nextSectionCode(sections) {
   return letters.length ? String.fromCharCode(Math.min(Math.max(...letters) + 1, 90)) : String(sections.length + 1)
 }
 
-function errorText(err, fallback) {
-  const detail = err.response?.data?.detail
-  if (typeof detail === 'string') return detail
-  if (Array.isArray(detail)) {
-    return detail.map((item) => String(item.msg || '').replace(/^Value error, /, '')).filter(Boolean).join('; ') || fallback
-  }
-  return fallback
-}
-
 function emptyQuestion() {
   return { code: '', text: { ru: '', kk: '', en: '' }, hint: { ru: '', kk: '', en: '' }, report_title: '', weight: 1 }
 }
@@ -150,7 +142,7 @@ export default function RatingTemplatesPage() {
       setSelectedYear((current) => preferredYear || current || location.state?.year || items[0]?.academic_year || '')
       setError('')
     } catch (err) {
-      setError(errorText(err, t('templates.loadError')))
+      setError(apiErrorText(err, t('templates.loadError')))
     } finally {
       setLoading(false)
     }
@@ -240,7 +232,7 @@ export default function RatingTemplatesPage() {
       setTemplates((items) => items.map((item) => (item.academic_year === saved.academic_year ? saved : item)))
       toast.success(t('templates.saved', { year: saved.academic_year }))
     } catch (err) {
-      const message = errorText(err, t('templates.saveError'))
+      const message = apiErrorText(err, t('templates.saveError'))
       setError(message)
       // Кнопка «Сохранить» внизу страницы — ошибку дублируем уведомлением, чтобы её было видно
       toast.error(message)
@@ -260,7 +252,7 @@ export default function RatingTemplatesPage() {
         ? t('templates.createdCopy', { year: created.academic_year, source })
         : t('templates.created', { year: created.academic_year }))
     } catch (err) {
-      setError(errorText(err, t('templates.createError')))
+      setError(apiErrorText(err, t('templates.createError')))
     } finally {
       setSaving(false)
     }
@@ -283,7 +275,7 @@ export default function RatingTemplatesPage() {
       await load(template.academic_year)
       toast.success(t('templates.deleted', { year: template.academic_year }))
     } catch (err) {
-      const message = errorText(err, t('templates.deleteError'))
+      const message = apiErrorText(err, t('templates.deleteError'))
       setError(message)
       toast.error(message)
     } finally {

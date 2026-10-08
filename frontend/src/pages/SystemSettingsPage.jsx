@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
+  apiErrorText,
   getAiSettings,
   getBasicInfoCatalog,
   getPlatonusStatus,
@@ -92,6 +93,8 @@ export default function SystemSettingsPage() {
     bind_password: '',
     certificate_key: '',
   })
+  // Сервер не возвращает пароль bind-учётки, только признак, что он сохранён
+  const [ldapPasswordConfigured, setLdapPasswordConfigured] = useState(false)
   const [ai, setAi] = useState({
     active_provider: 'openai',
     openai: { enabled: false, model: 'gpt-5.6-luna', api_key: '', api_key_configured: false },
@@ -119,7 +122,7 @@ export default function SystemSettingsPage() {
     if (statusResult.status === 'fulfilled') {
       setPlatonusStatus(statusResult.value)
     } else {
-      setPlatonusError(statusResult.reason?.response?.data?.detail || t('settingsPage.platonus.statusError'))
+      setPlatonusError(apiErrorText(statusResult.reason, t('settingsPage.platonus.statusError')))
     }
     setLoading(false)
   }
@@ -135,9 +138,10 @@ export default function SystemSettingsPage() {
           server_url: data.server_url || '',
           base_dn: data.base_dn || '',
           bind_dn: data.bind_dn || '',
-          bind_password: data.bind_password || '',
+          bind_password: '',
           certificate_key: data.certificate_key || '',
         })
+        setLdapPasswordConfigured(Boolean(data.bind_password_configured))
         setLdapError('')
       })
       .catch(() => setLdapError(t('settings.ldapLoadError')))
@@ -182,7 +186,7 @@ export default function SystemSettingsPage() {
       setPlatonusNotice(result.message || t('settingsPage.platonus.synced'))
       await load()
     } catch (err) {
-      setPlatonusError(err.response?.data?.detail || t('settingsPage.platonus.syncError'))
+      setPlatonusError(apiErrorText(err, t('settingsPage.platonus.syncError')))
     } finally {
       setPlatonusSyncing(false)
     }
@@ -196,8 +200,9 @@ export default function SystemSettingsPage() {
     setLdapSaving(true)
     try {
       const payload = { ...ldap }
-      await saveLdapSettings(payload)
-      setLdap(payload)
+      const saved = await saveLdapSettings(payload)
+      setLdap({ ...payload, bind_password: '' })
+      setLdapPasswordConfigured(Boolean(saved?.bind_password_configured))
       setLdapNotice(t('settings.ldapSaved'))
     } catch {
       setLdapError(t('settings.ldapSaveError'))
@@ -248,7 +253,7 @@ export default function SystemSettingsPage() {
       })
       setAiNotice(t('settingsPage.ai.saved'))
     } catch (err) {
-      setAiError(err.response?.data?.detail || t('settingsPage.ai.saveError'))
+      setAiError(apiErrorText(err, t('settingsPage.ai.saveError')))
     } finally {
       setAiSaving(false)
     }
@@ -262,7 +267,7 @@ export default function SystemSettingsPage() {
       const result = await testAiProvider(provider)
       setAiNotice(`${provider === 'openai' ? 'OpenAI' : 'Gemini'}: ${result.message}`)
     } catch (err) {
-      setAiError(err.response?.data?.detail || t('settingsPage.ai.testError'))
+      setAiError(apiErrorText(err, t('settingsPage.ai.testError')))
     } finally {
       setAiTesting('')
     }
@@ -531,7 +536,11 @@ export default function SystemSettingsPage() {
                   spellCheck={false}
                 />
               </Field>
-              <Field label={t('settings.bindPassword')} className="sm:col-span-2">
+              <Field
+                label={t('settings.bindPassword')}
+                hint={ldapPasswordConfigured ? t('settings.bindPasswordKept') : undefined}
+                className="sm:col-span-2"
+              >
                 <Input
                   type="password"
                   placeholder={PLACEHOLDERS.password}

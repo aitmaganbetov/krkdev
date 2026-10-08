@@ -27,5 +27,7 @@ export default defineConfig({
     url: `http://127.0.0.1:${PORT}/login`,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
+    // Демо-занятия мониторинга (только dev-флаг): без них визуальный тест не видит карточки занятий
+    env: { VITE_MONITORING_DEMO: 'true' },
   },
 })

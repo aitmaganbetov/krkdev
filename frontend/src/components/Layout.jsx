@@ -1,10 +1,10 @@
 import { Outlet, Navigate, useLocation, useNavigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import Sidebar, { Brand, NavList } from './Sidebar'
-import { Button, Drawer, Icon, Menu, SegmentedControl, cn } from './ui'
+import { Button, Drawer, Icon, LoadingBlock, Menu, SegmentedControl, cn } from './ui'
 
 const LANGS = [
   { value: 'ru', label: 'RU', title: 'Русский' },
@@ -47,7 +47,7 @@ function UserMenu() {
           <p className="text-xs text-fg-subtle">{roleLabel}</p>
         </div>
       }
-      items={[{ label: t('sidebar.logout'), icon: 'logout', tone: 'danger', onClick: () => { logout(); navigate('/login') } }]}
+      items={[{ label: t('sidebar.logout'), icon: 'logout', tone: 'danger', onClick: async () => { await logout(); navigate('/login', { replace: true }) } }]}
       trigger={(p) => (
         <button {...p} type="button" aria-label={t('shell.account')}
           className="flex min-h-10 min-w-0 cursor-pointer items-center gap-2 rounded-md py-1 pl-1 pr-2 text-left transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
@@ -107,7 +107,9 @@ export default function Layout() {
 
         <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 outline-none">
           <div className="mx-auto w-full min-w-0 max-w-[96rem] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-            <Outlet />
+            <Suspense fallback={<LoadingBlock label={t('ui.loading')} />}>
+              <Outlet />
+            </Suspense>
           </div>
         </main>
       </div>
@@ -125,7 +127,7 @@ export default function Layout() {
                 <p className="truncate text-sm font-medium text-fg" title={currentUser}>{currentUser || '—'}</p>
                 <p className="text-xs text-fg-subtle">{t(`shell.roles.${role || 'staff'}`)}</p>
               </div>
-              <Button variant="danger-ghost" size="sm" icon="logout" onClick={() => { logout(); navigate('/login') }}>
+              <Button variant="danger-ghost" size="sm" icon="logout" onClick={async () => { await logout(); navigate('/login', { replace: true }) }}>
                 {t('sidebar.logout')}
               </Button>
             </div>

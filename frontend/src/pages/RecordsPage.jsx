@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { getRecords, deleteRecord, getBasicInfoCatalog, getAcademicYears } from '../services/api'
@@ -168,12 +168,15 @@ export default function RecordsPage() {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [loading, setLoading] = useState(true)
+  // Ключ перевода ошибки (переводится при рендере — смена языка не вызывает перезагрузку)
   const [error, setError] = useState('')
   const [deleting, setDeleting] = useState(null)
   const [exporting, setExporting] = useState(false)
 
   // Filters
   const [search, setSearch] = useState('')
+  // Запрос к API уходит после паузы ввода
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [filterYear, setFilterYear] = useState('')
   // Пока не известен учебный год по умолчанию, список не грузим, чтобы не мигал «все годы»
   const [yearReady, setYearReady] = useState(false)
@@ -221,26 +224,37 @@ export default function RecordsPage() {
 
   const opOptions = filterFaculty ? (opsByFaculty[filterFaculty] ?? []) : allOps
 
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300)
+    return () => clearTimeout(timer)
+  }, [search])
+
+  // Номер последнего запроса: ответы устаревших запросов игнорируются
+  const requestIdRef = useRef(0)
+
   const fetchRecords = useCallback(async (pageNum = 0) => {
+    const requestId = ++requestIdRef.current
     setLoading(true)
+    setError('')
     try {
       const data = await getRecords({
         skip: pageNum * pageSize,
         limit: pageSize,
-        search: search || undefined,
+        search: debouncedSearch || undefined,
         academic_year: filterYear || undefined,
         faculty: filterFaculty || undefined,
         op: filterOp || undefined,
         status: filterStatus || undefined,
       })
+      if (requestId !== requestIdRef.current) return
       setItems(data.items)
       setTotal(data.total)
     } catch {
-      setError(t('records.loadError'))
+      if (requestId === requestIdRef.current) setError('records.loadError')
     } finally {
-      setLoading(false)
+      if (requestId === requestIdRef.current) setLoading(false)
     }
-  }, [search, filterYear, filterFaculty, filterOp, filterStatus, pageSize, t])
+  }, [debouncedSearch, filterYear, filterFaculty, filterOp, filterStatus, pageSize])
 
   // Фильтр по умолчанию — учебный год из справочника (выбран админом или текущий по дате)
   useEffect(() => {
@@ -532,14 +546,14 @@ export default function RecordsPage() {
       header: t('records.score'),
       align: 'right',
       nowrap: true,
-      cell: (r) => <span className={`font-semibold tabular ${scoreToneClass(r.score)}`}>{r.score.toFixed(1)}</span>,
+      cell: (r) => <span className={`font-semibold tabular ${scoreToneClass(r.score)}`}>{Number(r.score || 0).toFixed(1)}</span>,
     },
     {
       key: 'attendance',
       header: t('records.attendance'),
       align: 'right',
       nowrap: true,
-      cell: (r) => <span className="tabular">{r.attendance.toFixed(0)}%</span>,
+      cell: (r) => <span className="tabular">{Number(r.attendance || 0).toFixed(0)}%</span>,
     },
     {
       key: 'savedBy',
@@ -690,7 +704,7 @@ export default function RecordsPage() {
 
       {/* Ошибка загрузки заменяет таблицу, как и раньше; закрыв сообщение, можно вернуться к списку */}
       {error ? (
-        <Alert tone="danger" onClose={() => setError('')} closeLabel={t('ui.close')}>{error}</Alert>
+        <Alert tone="danger" onClose={() => setError('')} closeLabel={t('ui.close')}>{t(error)}</Alert>
       ) : (
         <Card className="overflow-hidden">
           <DataTable

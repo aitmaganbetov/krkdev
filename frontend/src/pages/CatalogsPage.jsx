@@ -1,6 +1,7 @@
+import { Suspense } from 'react'
 import { Outlet } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { NavTabs, PageHeader, PageStack } from '../components/ui'
+import { LoadingBlock, NavTabs, PageHeader, PageStack } from '../components/ui'
 
 export default function CatalogsPage() {
   const { t } = useTranslation()
@@ -14,7 +15,9 @@ export default function CatalogsPage() {
           { to: '/catalogs/academic-years', label: t('catalogs.tabs.years'), icon: 'calendar' },
         ]}
       />
-      <Outlet />
+      <Suspense fallback={<LoadingBlock label={t('ui.loading')} />}>
+        <Outlet />
+      </Suspense>
     </PageStack>
   )
 }

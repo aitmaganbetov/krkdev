@@ -40,6 +40,7 @@ export default {
       lesson: {
         risk: 'Риск',
         active: 'Активно',
+        demo: 'Демо',
         time: 'Время',
         room: 'Аудитория',
         subject: 'Дисциплина',
@@ -193,6 +194,7 @@ export default {
       lesson: {
         risk: 'Тәуекел',
         active: 'Белсенді',
+        demo: 'Демо',
         time: 'Уақыты',
         room: 'Аудитория',
         subject: 'Пән',
@@ -346,6 +348,7 @@ export default {
       lesson: {
         risk: 'At risk',
         active: 'Active',
+        demo: 'Demo',
         time: 'Time',
         room: 'Room',
         subject: 'Subject',

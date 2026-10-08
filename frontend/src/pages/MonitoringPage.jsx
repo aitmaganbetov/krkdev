@@ -11,7 +11,9 @@ import {
   recordRoomVideo,
   reviewViolation,
   uploadViolationAct,
+  apiErrorText,
 } from '../services/api'
+import { toDatetimeLocalUtcPlus5 } from '../utils/datetime'
 import { useAuth } from '../context/AuthContext'
 import {
   Alert, Badge, Button, Card, CardBody, CardFooter, CardHeader, DataTable, DescriptionList, EmptyState, Field,
@@ -53,6 +55,12 @@ const dateLocale = (lang) => DATE_LOCALES[lang] || 'ru-RU'
 
 // Фон области просмотра медиа: тёмный в обеих темах (единственное допустимое исключение из токенов).
 const MEDIA_BG = 'bg-[rgb(6_18_31)]'
+
+// Демо-занятия (для разработки) — только при VITE_MONITORING_DEMO=true.
+const DEMO_ENABLED = import.meta.env.VITE_MONITORING_DEMO === 'true'
+
+// Сегодняшняя дата (YYYY-MM-DD) в часовом поясе приложения (UTC+5)
+const todayUtcPlus5 = () => toDatetimeLocalUtcPlus5(new Date()).slice(0, 10)
 
 function getDemoLessons(date, databaseRecords, configuredRooms) {
   const uniqueTeachers = new Set()
@@ -118,9 +126,12 @@ function LessonCard({ record, onOpen }) {
         <div className="min-w-0 flex-1">
           <h3 className="break-words text-base font-semibold text-fg" title={record.teacher}>{record.teacher}</h3>
           {record.faculty && <TruncatedText lines={2} className="mt-0.5 text-xs text-fg-muted">{record.faculty}</TruncatedText>}
-          <Badge tone={isProblem ? 'danger' : 'success'} dot className="mt-2">
-            {isProblem ? t('monitoring.lesson.risk') : t('monitoring.lesson.active')}
-          </Badge>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <Badge tone={isProblem ? 'danger' : 'success'} dot>
+              {isProblem ? t('monitoring.lesson.risk') : t('monitoring.lesson.active')}
+            </Badge>
+            {record.is_demo && <Badge tone="warning">{t('monitoring.lesson.demo')}</Badge>}
+          </div>
         </div>
       </div>
 
@@ -339,12 +350,12 @@ export default function MonitoringPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [tab, setTab] = useState('live')
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(todayUtcPlus5)
   const [teacher, setTeacher] = useState('')
   const [room, setRoom] = useState('')
   const [selectedLesson, setSelectedLesson] = useState(null)
   const [violationType, setViolationType] = useState(DEFAULT_VIOLATION_TYPE)
-  const [violationDate, setViolationDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [violationDate, setViolationDate] = useState(todayUtcPlus5)
   const [violationDescription, setViolationDescription] = useState('')
   const [savingViolation, setSavingViolation] = useState(false)
   // Сообщение внутри формы фиксации: { tone, text }
@@ -425,7 +436,7 @@ export default function MonitoringPage() {
     } catch (err) {
       setViolationNotice({
         tone: 'danger',
-        text: err.response?.data?.detail || t(kind === 'photo' ? 'monitoring.form.photoError' : 'monitoring.form.videoError'),
+        text: apiErrorText(err, t(kind === 'photo' ? 'monitoring.form.photoError' : 'monitoring.form.videoError')),
       })
     } finally {
       setCapturing('')
@@ -447,7 +458,7 @@ export default function MonitoringPage() {
         text: t('monitoring.form.aiImproved', { provider: result.provider === 'openai' ? 'OpenAI' : 'Gemini' }),
       })
     } catch (err) {
-      setViolationNotice({ tone: 'danger', text: err.response?.data?.detail || t('monitoring.form.aiError') })
+      setViolationNotice({ tone: 'danger', text: apiErrorText(err, t('monitoring.form.aiError')) })
     } finally {
       setImprovingText(false)
     }
@@ -460,6 +471,7 @@ export default function MonitoringPage() {
     setViolationNotice(null)
     try {
       await createViolation({
+        // Демо-занятия бывают только при VITE_MONITORING_DEMO (dev); id вида demo-<id> явно помечает такую ссылку
         lesson_ref: String(selectedLesson.id),
         teacher: selectedLesson.teacher,
         room: selectedLesson.room || '',
@@ -474,7 +486,7 @@ export default function MonitoringPage() {
       loadViolations()
       setTab('violations')
     } catch (err) {
-      setViolationNotice({ tone: 'danger', text: err.response?.data?.detail || t('monitoring.form.saveError') })
+      setViolationNotice({ tone: 'danger', text: apiErrorText(err, t('monitoring.form.saveError')) })
     } finally {
       setSavingViolation(false)
     }
@@ -496,7 +508,7 @@ export default function MonitoringPage() {
       setReviewTarget(null)
       loadViolations()
     } catch (err) {
-      toast.error(err.response?.data?.detail || t('monitoring.review.reviewError'))
+      toast.error(apiErrorText(err, t('monitoring.review.reviewError')))
     } finally {
       setReviewing(false)
     }
@@ -513,7 +525,7 @@ export default function MonitoringPage() {
       toast.success(t('monitoring.review.actUploaded'))
       loadViolations()
     } catch (err) {
-      toast.error(err.response?.data?.detail || t('monitoring.review.actUploadError'))
+      toast.error(apiErrorText(err, t('monitoring.review.actUploadError')))
     } finally {
       setUploadingActId(null)
     }
@@ -522,7 +534,10 @@ export default function MonitoringPage() {
   const filtered = useMemo(() => {
     const queryTeacher = teacher.trim().toLowerCase()
     const queryRoom = room.trim().toLowerCase()
-    const recordsWithDemo = [...getDemoLessons(date, records, rooms), ...records]
+    // Демо-занятия добавляются только во вкладку «Онлайн» (с фильтром по дате)
+    const recordsWithDemo = DEMO_ENABLED && tab === 'live'
+      ? [...getDemoLessons(date, records, rooms), ...records]
+      : records
     return recordsWithDemo.filter((record) => {
       const recordDate = String(record.datetime || '').slice(0, 10)
       const matchesDate = tab === 'archive' || tab === 'analytics' || recordDate === date
@@ -551,12 +566,14 @@ export default function MonitoringPage() {
     setPage(1)
   }, [tab, date, teacher, room, pageSize])
 
-  const problemCount = filtered.filter((record) => isLowScore(record)).length
-  const avgAttendance = filtered.length
-    ? filtered.reduce((sum, record) => sum + Number(record.attendance || 0), 0) / filtered.length
+  // Демо-занятия не участвуют в статистике
+  const realFiltered = filtered.filter((record) => !record.is_demo)
+  const problemCount = realFiltered.filter((record) => isLowScore(record)).length
+  const avgAttendance = realFiltered.length
+    ? realFiltered.reduce((sum, record) => sum + Number(record.attendance || 0), 0) / realFiltered.length
     : 0
-  const avgScore = filtered.length
-    ? filtered.reduce((sum, record) => sum + Number(record.score || 0), 0) / filtered.length
+  const avgScore = realFiltered.length
+    ? realFiltered.reduce((sum, record) => sum + Number(record.score || 0), 0) / realFiltered.length
     : 0
 
   const tabItems = tabs.map((item) => ({ value: item.id, icon: item.icon, label: t(`monitoring.tabs.${item.id}`) }))
@@ -602,7 +619,7 @@ export default function MonitoringPage() {
       </FilterBar>
 
       <section className="grid min-w-0 grid-cols-2 gap-4 xl:grid-cols-4">
-        <StatCard label={t('monitoring.metrics.lessons')} value={filtered.length} tone="primary" />
+        <StatCard label={t('monitoring.metrics.lessons')} value={realFiltered.length} tone="primary" />
         <StatCard label={t('monitoring.metrics.avgScore')} value={avgScore.toFixed(1)} tone="success" />
         <StatCard label={t('monitoring.metrics.attendance')} value={`${avgAttendance.toFixed(0)}%`} tone="warning" />
         <StatCard label={t('monitoring.metrics.violations')} value={problemCount} tone="danger" />

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
-  getRecord, deleteRecord, submitRecord, sendRecordToRework, acceptRecord
+  getRecord, deleteRecord, submitRecord, sendRecordToRework, acceptRecord, apiErrorText,
 } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import StatusBadge from '../components/StatusBadge'
@@ -82,7 +82,7 @@ export default function RecordDetailPage() {
       toast.success(t('recordForm.detail.deleted'))
       navigate('/records')
     } catch (err) {
-      setError(err.response?.data?.detail ?? t('recordForm.detail.deleteError'))
+      setError(apiErrorText(err, t('recordForm.detail.deleteError')))
       stopAction()
     }
   }
@@ -97,7 +97,7 @@ export default function RecordDetailPage() {
       stopAction()
       toast.success(t('recordForm.detail.submitted'))
     } catch (err) {
-      setError(err.response?.data?.detail ?? t('recordForm.detail.submitError'))
+      setError(apiErrorText(err, t('recordForm.detail.submitError')))
       stopAction()
     }
   }
@@ -112,7 +112,7 @@ export default function RecordDetailPage() {
       stopAction()
       toast.success(t('recordForm.detail.reworked'))
     } catch (err) {
-      setError(err.response?.data?.detail ?? t('recordForm.detail.reworkError'))
+      setError(apiErrorText(err, t('recordForm.detail.reworkError')))
       stopAction()
     }
   }
@@ -127,7 +127,7 @@ export default function RecordDetailPage() {
       stopAction()
       toast.success(t('recordForm.detail.accepted'))
     } catch (err) {
-      setError(err.response?.data?.detail ?? t('recordForm.detail.acceptError'))
+      setError(apiErrorText(err, t('recordForm.detail.acceptError')))
       stopAction()
     }
   }

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
+import { apiErrorText } from '../services/api'
 import { useTheme } from '../context/ThemeContext'
 import { Alert, Button, Card, Field, Input, SegmentedControl } from '../components/ui'
 import { SapaLogo, SapaMark, SapaWordmark } from '../components/brand/SapaLogo'
@@ -30,7 +31,7 @@ export default function LoginPage() {
       await login(username, password)
       navigate('/dashboard', { replace: true })
     } catch (err) {
-      setError(err.response?.data?.detail ?? t('auth.loginError'))
+      setError(apiErrorText(err, t('auth.loginError')))
     } finally {
       setLoading(false)
     }

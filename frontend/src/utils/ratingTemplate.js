@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getRatingTemplates } from '../services/api'
+import { apiErrorText, getRatingTemplates } from '../services/api'
 
 export const CALC_METHOD_LABELS = {
   average: 'Среднее всех ответов',
@@ -34,7 +34,7 @@ export function useRatingTemplates() {
       .catch((err) => active && setState({
         templates: [],
         loading: false,
-        error: err.response?.data?.detail ?? 'Не удалось загрузить справочник вопросов',
+        error: apiErrorText(err, 'Не удалось загрузить справочник вопросов'),
       }))
     return () => { active = false }
   }, [])

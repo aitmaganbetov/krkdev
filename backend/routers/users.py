@@ -16,6 +16,8 @@ from urllib.parse import urlparse
 from database import get_db
 from services import ROLE_ADMIN, get_current_user, require_roles
 from services.audit_log import audit_event
+from services.auth_service import invalidate_account_state
+from services.secret_box import decode_ldap_settings
 from services.request_meta import get_client_ip
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -278,7 +280,7 @@ def _load_ldap_settings(db: Session) -> dict:
     except (TypeError, ValueError):
         return {}
 
-    return data if isinstance(data, dict) else {}
+    return decode_ldap_settings(data) if isinstance(data, dict) else {}
 
 
 def _username_aliases(username: str) -> set[str]:
@@ -607,6 +609,36 @@ def list_ldap_directory_users(
         raise HTTPException(status_code=503, detail=f"Ошибка LDAP: {exc}") from exc
 
 
+def _guard_admin_demotion(db: Session, target_username: str, new_role: str, actor: str | None) -> None:
+    """Не даёт снять роль admin с себя и с последнего администратора."""
+    if new_role == ROLE_ADMIN:
+        return
+    current = db.execute(
+        text("""
+            SELECT COALESCE(r.name, 'staff') AS role
+            FROM users u
+            LEFT JOIN roles r ON r.id = u.role_id
+            WHERE u.username = :username
+            LIMIT 1
+        """),
+        {"username": target_username},
+    ).scalar()
+    if current != ROLE_ADMIN:
+        return
+    if target_username == _normalize_username(actor or ""):
+        raise HTTPException(status_code=400, detail="Нельзя снять роль администратора с самого себя")
+    admins_count = db.execute(
+        text("""
+            SELECT COUNT(*)
+            FROM users u
+            LEFT JOIN roles r ON r.id = u.role_id
+            WHERE COALESCE(r.name, 'staff') = 'admin'
+        """),
+    ).scalar() or 0
+    if int(admins_count) <= 1:
+        raise HTTPException(status_code=400, detail="Нельзя понизить последнего администратора")
+
+
 @router.patch("/local/{username}/role", response_model=CachedUserOut)
 def update_local_user_role(
     username: str,
@@ -629,6 +661,7 @@ def update_local_user_role(
         ).mappings().first()
         if not target:
             raise HTTPException(status_code=404, detail="Пользователь не найден")
+        _guard_admin_demotion(db, username.strip().lower(), role, context.get("username"))
 
         db.execute(
             text("""
@@ -639,6 +672,7 @@ def update_local_user_role(
             {"role": role, "username": username.strip().lower()},
         )
         db.commit()
+        invalidate_account_state(username)
 
         row = _fetch_local_user_row(db, username)
 
@@ -720,6 +754,7 @@ def create_local_user(
             },
         )
         db.commit()
+        invalidate_account_state(username)
 
         row = _fetch_local_user_row(db, username)
         if not row:
@@ -805,6 +840,7 @@ def update_local_user(
             )
 
         if role is not None:
+            _guard_admin_demotion(db, normalized, role, context.get("username"))
             db.execute(
                 text("""
                     UPDATE users
@@ -815,6 +851,7 @@ def update_local_user(
             )
 
         db.commit()
+        invalidate_account_state(normalized)
 
         row = _fetch_local_user_row(db, normalized)
         if not row:
@@ -900,6 +937,7 @@ def delete_local_user(
             {"username": normalized},
         )
         db.commit()
+        invalidate_account_state(normalized)
 
         audit_event(
             action="admin.users.delete",
@@ -980,6 +1018,7 @@ def block_local_user(
                 {"username": normalized, "reason": reason, "duration_minutes": duration_minutes},
             )
         db.commit()
+        invalidate_account_state(normalized)
 
         row = _fetch_local_user_row(db, normalized)
         if not row:
@@ -1041,6 +1080,7 @@ def unblock_local_user(
             {"username": normalized},
         )
         db.commit()
+        invalidate_account_state(normalized)
 
         row = _fetch_local_user_row(db, normalized)
         if not row:

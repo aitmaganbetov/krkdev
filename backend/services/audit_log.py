@@ -62,9 +62,10 @@ def audit_event(action: str, outcome: str = "success", actor: str | None = None,
                 timestamp=datetime.now(timezone.utc),
                 action=action,
                 outcome=outcome,
-                actor=actor or "unknown",
+                # Обрезка под размеры колонок: слишком длинное значение не должно терять запись аудита
+                actor=(actor or "unknown")[:255],
                 details=payload.get("details"),
-                ip_address=ip_address,
+                ip_address=(ip_address or None) and ip_address[:45],
             )
             db.add(audit_entry)
             db.commit()

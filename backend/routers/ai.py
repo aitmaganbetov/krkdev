@@ -1,12 +1,12 @@
-import base64
-import hashlib
 import json
 import os
+from collections import defaultdict, deque
+from threading import Lock
+from time import monotonic
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from services import ROLE_ADMIN, ROLE_INSPECTOR, require_roles
 from services.audit_log import audit_event
+from services.secret_box import decrypt_secret, encrypt_secret
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -84,24 +85,9 @@ def _ensure_settings_table(db: Session) -> None:
     db.commit()
 
 
-def _fernet() -> Fernet:
-    secret = os.getenv("SECRET_KEY", "").encode("utf-8")
-    if not secret:
-        raise RuntimeError("SECRET_KEY is required")
-    return Fernet(base64.urlsafe_b64encode(hashlib.sha256(secret).digest()))
-
-
-def _encrypt_secret(value: str) -> str:
-    return _fernet().encrypt(value.encode("utf-8")).decode("ascii") if value else ""
-
-
-def _decrypt_secret(value: str) -> str:
-    if not value:
-        return ""
-    try:
-        return _fernet().decrypt(value.encode("ascii")).decode("utf-8")
-    except InvalidToken:
-        return ""
+# Шифрование секретов в БД — общий модуль (камеры, AI, LDAP)
+_encrypt_secret = encrypt_secret
+_decrypt_secret = decrypt_secret
 
 
 def _load_settings(db: Session) -> dict:
@@ -285,14 +271,34 @@ def test_ai_provider(
 ):
     if provider not in {"openai", "gemini"}:
         raise HTTPException(status_code=404, detail="AI-провайдер не найден")
-    result, model = _call_provider(provider, _load_settings(db), "Ответь только одним словом: OK")
+    settings = _load_settings(db)
+    db.close()
+    result, model = _call_provider(provider, settings, "Ответь только одним словом: OK")
     audit_event(
         action="admin.settings.ai.test",
         outcome="success",
         actor=context.get("username"),
         details={"provider": provider, "model": model},
+        db=db,
     )
     return AiTestOut(success=True, message=f"Подключение работает: {result[:100]}")
+
+
+AI_IMPROVE_MAX_PER_HOUR = int(os.getenv("AI_IMPROVE_MAX_PER_HOUR", "30"))
+_improve_calls: dict[str, deque[float]] = defaultdict(deque)
+_improve_lock = Lock()
+
+
+def _check_improve_quota(username: str) -> None:
+    """Лимит запросов к платному AI-провайдеру на пользователя (скользящий час, в памяти процесса)."""
+    now = monotonic()
+    with _improve_lock:
+        calls = _improve_calls[username]
+        while calls and calls[0] < now - 3600:
+            calls.popleft()
+        if len(calls) >= AI_IMPROVE_MAX_PER_HOUR:
+            raise HTTPException(status_code=429, detail="Превышен лимит запросов к AI. Попробуйте позже.")
+        calls.append(now)
 
 
 @router.post("/improve", response_model=ImproveTextOut)
@@ -301,7 +307,12 @@ def improve_violation_text(
     db: Session = Depends(get_db),
     context: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
 ):
+    username = context.get("username") or "unknown"
+    _check_improve_quota(username)
     settings = _load_settings(db)
+    # Соединение с БД не держим во время запроса к провайдеру (до 45 с): иначе
+    # параллельные запросы исчерпывают пул соединений всего API
+    db.close()
     provider = settings["active_provider"]
     prompt = (
         "Улучши текст описания нарушения для официального акта внутреннего контроля. "
@@ -315,7 +326,8 @@ def improve_violation_text(
     audit_event(
         action="monitoring.violation.ai_improve",
         outcome="success",
-        actor=context.get("username"),
+        actor=username,
         details={"provider": provider, "model": model, "input_length": len(body.text)},
+        db=db,
     )
     return ImproveTextOut(text=improved, provider=provider, model=model)

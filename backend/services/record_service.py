@@ -6,7 +6,6 @@ from schemas.record import RecordCreate, RecordUpdate, DashboardStats
 from services import rating_template_service as rating_templates
 from fastapi import HTTPException, status
 from typing import Optional
-from datetime import datetime
 
 
 def _compute_attendance(students_plan: int, students_fact: int) -> float:
@@ -152,8 +151,12 @@ def get_records(
     return total, items
 
 
-def get_record_by_id(db: Session, record_id: int) -> Record:
-    record = db.query(Record).filter(Record.id == record_id).first()
+def get_record_by_id(db: Session, record_id: int, for_update: bool = False) -> Record:
+    query = db.query(Record).filter(Record.id == record_id)
+    if for_update:
+        # Блокировка строки до commit: параллельные смены статуса и правки идут по очереди
+        query = query.with_for_update()
+    record = query.first()
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
     return enrich_record_display_names(db, record)
@@ -167,6 +170,7 @@ def create_record(db: Session, data: RecordCreate, submitted_by: str) -> Record:
 
     record = Record(
         **data.model_dump(),
+        status="draft",
         score=score,
         attendance=attendance,
         is_problem=rating_templates.compute_is_problem(template, score, attendance),
@@ -185,7 +189,7 @@ def update_record(
     updated_by: Optional[str] = None,
     user_role: Optional[str] = None,
 ) -> Record:
-    record = get_record_by_id(db, record_id)
+    record = get_record_by_id(db, record_id, for_update=True)
     
     # Cannot edit accepted records (for anyone)
     if record.status == "accepted":
@@ -207,12 +211,30 @@ def update_record(
                 detail="Staff can only edit draft or rework records"
             )
     
-    # Admin and Inspector can change status and edit records
-    # Extract status change separately to track review
+    # Чужие черновики инспектору недоступны и на чтение (см. GET /records/{id})
+    if (
+        user_role
+        and user_role.lower() == "inspector"
+        and record.status == "draft"
+        and not _is_owner(record.submitted_by, updated_by)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Inspector cannot edit draft records of other users",
+        )
+
+    # Статус через PATCH не меняется: только /submit, /send-to-rework, /accept
     updates = data.model_dump(exclude_unset=True)
-    status_change = updates.pop("status", None) if "status" in updates else None
-    
-    # Update regular fields
+
+    # Инвариант проверяется по итоговым значениям: PATCH может прислать только одно из полей
+    plan = updates.get("students_plan", record.students_plan)
+    fact = updates.get("students_fact", record.students_fact)
+    if plan is not None and fact is not None and fact > plan:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="students_fact cannot be greater than students_plan",
+        )
+
     for field, value in updates.items():
         setattr(record, field, value)
 
@@ -228,25 +250,6 @@ def update_record(
             record.attendance = _compute_attendance(record.students_plan, record.students_fact)
         record.is_problem = rating_templates.compute_is_problem(template, record.score, record.attendance)
 
-    # Handle status transitions
-    if status_change:
-        # Only admin/inspector can change status
-        if user_role and user_role.lower() == "staff":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Staff cannot change record status"
-            )
-        
-        record.status = status_change
-        record.reviewed_by = updated_by
-        record.reviewed_at = datetime.utcnow()
-        
-        # First time transition from draft to submitted
-        if record.status == "submitted" and not record.submitted_at:
-            record.submitted_at = datetime.utcnow()
-            if not record.submitted_by:
-                record.submitted_by = updated_by
-
     # For draft records being edited by staff, set submitted_by
     if updated_by and record.status == "draft":
         if not record.submitted_by:
@@ -258,7 +261,7 @@ def update_record(
 
 
 def delete_record(db: Session, record_id: int) -> None:
-    record = get_record_by_id(db, record_id)
+    record = get_record_by_id(db, record_id, for_update=True)
     
     # Cannot delete accepted records
     if record.status == "accepted":

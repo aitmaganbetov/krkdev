@@ -37,7 +37,7 @@ def import_faculties() -> Dict:
         faculties = remote_cursor.fetchall()
         remote_conn.close()
         
-        # Create table in local database
+        # DDL в MySQL коммитится неявно, поэтому выполняется отдельно от замены данных
         with engine.begin() as conn:
             conn.execute(text("""
             CREATE TABLE IF NOT EXISTS faculties (
@@ -48,9 +48,11 @@ def import_faculties() -> Dict:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
             """))
-            
-            # Clear existing data
-            conn.execute(text("TRUNCATE TABLE faculties"))
+
+        # DELETE вместо TRUNCATE: TRUNCATE коммитится сразу, и при сбое вставки
+        # таблица осталась бы пустой. Здесь сбой откатывает всю замену.
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM faculties"))
             
             # Insert faculties
             for faculty in faculties:

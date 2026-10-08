@@ -1,9 +1,10 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    # Длины ограничены размерами колонок users/audit_logs: иначе запись аудита падает
+    username: str = Field(max_length=255)
+    password: str = Field(max_length=1024)
 
 
 class TokenOut(BaseModel):

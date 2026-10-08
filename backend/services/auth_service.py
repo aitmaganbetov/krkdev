@@ -5,6 +5,7 @@ from fastapi.security import OAuth2PasswordBearer
 from dotenv import load_dotenv
 from sqlalchemy import text
 from database import SessionLocal
+from services.secret_box import decode_ldap_settings
 import hashlib
 import base64
 import json
@@ -15,6 +16,8 @@ import ssl
 import site
 import sys
 from urllib.parse import urlparse
+from threading import Lock
+from time import monotonic
 
 load_dotenv()
 
@@ -218,7 +221,7 @@ def _get_ldap_settings(db) -> dict:
     try:
         data = json.loads(row["value_text"])
         if isinstance(data, dict):
-            return data
+            return decode_ldap_settings(data)
     except (TypeError, ValueError):
         pass
 
@@ -293,6 +296,7 @@ def _upsert_user(
         },
     )
     db.commit()
+    invalidate_account_state(normalized_username)
 
 
 def _get_cached_user(db, username: str):
@@ -591,6 +595,8 @@ def _merge_legacy_usernames(db, canonical_username: str, aliases: list[str]) -> 
             {"alias": alias},
         )
     db.commit()
+    for alias in alias_set:
+        invalidate_account_state(alias)
 
 
 def _ldap_authenticate(username: str, password: str, settings: dict) -> tuple[bool, dict, str]:
@@ -614,11 +620,21 @@ def _ldap_authenticate(username: str, password: str, settings: dict) -> tuple[bo
     base_dn = (settings.get("base_dn") or "").strip()
     bind_dn = (settings.get("bind_dn") or "").strip()
     bind_password = settings.get("bind_password") or ""
+    cert_data = (settings.get("certificate_key") or "").strip()
     short_username = _short_ldap_username(username)
     user_filter = _build_ldap_filter("", short_username)
 
     try:
-        server = Server(host, port=port, use_ssl=use_ssl, get_info=ALL, connect_timeout=5)
+        # Сертификат проверяется так же, как в каталоге пользователей и тесте LDAP:
+        # без проверки пароли пользователей и bind-учётки можно перехватить подменой сервера.
+        tls = None
+        if use_ssl:
+            if cert_data:
+                tls = Tls(validate=ssl.CERT_REQUIRED, ca_certs_data=cert_data)
+            else:
+                tls = Tls(validate=ssl.CERT_REQUIRED)
+
+        server = Server(host, port=port, use_ssl=use_ssl, tls=tls, get_info=ALL, connect_timeout=5)
 
         search_connection = None
         if bind_dn:
@@ -886,7 +902,11 @@ def authenticate_user_details(username: str, password: str) -> tuple[bool, str, 
     normalized_username = _normalize_username(username)
 
     # Environment admin user still supported.
-    if ADMIN_USERNAME and ADMIN_PASSWORD and hmac.compare_digest(username, ADMIN_USERNAME) and hmac.compare_digest(password, ADMIN_PASSWORD):
+    is_env_admin_login = (
+        bool(ADMIN_USERNAME and ADMIN_PASSWORD)
+        and normalized_username == _normalize_username(ADMIN_USERNAME)
+    )
+    if is_env_admin_login and hmac.compare_digest((password or "").encode("utf-8"), ADMIN_PASSWORD.encode("utf-8")):
         db = SessionLocal()
         try:
             _ensure_users_table(db)
@@ -903,6 +923,11 @@ def authenticate_user_details(username: str, password: str) -> tuple[bool, str, 
         finally:
             db.close()
         return True, normalized_username, "local_admin", ROLE_ADMIN
+
+    # Env-админ входит только по актуальному ADMIN_PASSWORD: после ротации старый пароль
+    # из локального кэша не должен подходить.
+    if is_env_admin_login:
+        return False, normalized_username, "invalid_credentials", ROLE_STAFF
 
     db = SessionLocal()
     try:
@@ -1028,17 +1053,85 @@ def get_current_user_context(token: str = Depends(_resolve_access_token)) -> dic
         username: str = payload.get("sub")
         if username is None:
             raise credentials_exception
-        role = (payload.get("role") or ROLE_STAFF).strip().lower()
-        if role not in ALL_ROLES:
-            role = ROLE_STAFF
         auth_source = payload.get("auth_source") or "unknown"
     except JWTError:
         raise credentials_exception
+
+    # JWT не отзывается сам по себе: удаление, блокировка администратором и смена роли
+    # должны действовать сразу, поэтому роль берётся из БД, а не из токена.
+    account = _get_account_state(username)
+    if account is None or account["blocked"]:
+        raise credentials_exception
     return {
         "username": username,
-        "role": role,
+        "role": account["role"],
         "auth_source": str(auth_source),
     }
+
+
+ACCOUNT_STATE_CACHE_SECONDS = 15
+_account_state_cache: dict[str, tuple[float, dict]] = {}
+_account_state_lock = Lock()
+# Растёт при каждом сбросе: результат запроса, начатого до сброса, в кэш не попадёт
+_account_state_generation = 0
+
+
+def invalidate_account_state(username: str | None = None) -> None:
+    global _account_state_generation
+    with _account_state_lock:
+        _account_state_generation += 1
+        if username is None:
+            _account_state_cache.clear()
+        else:
+            _account_state_cache.pop(_normalize_username(username), None)
+
+
+def _get_account_state(username: str) -> dict | None:
+    key = _normalize_username(username)
+    now = monotonic()
+    with _account_state_lock:
+        cached = _account_state_cache.get(key)
+        if cached and cached[0] > now:
+            return cached[1]
+        generation = _account_state_generation
+
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text("""
+                SELECT u.is_blocked, u.blocked_until, u.block_reason, r.name AS role_name
+                FROM users u
+                LEFT JOIN roles r ON r.id = u.role_id
+                WHERE u.username = :username
+                LIMIT 1
+            """),
+            {"username": key},
+        ).mappings().first()
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unavailable")
+    finally:
+        db.close()
+
+    state = None
+    if row:
+        role = (row.get("role_name") or ROLE_STAFF).strip().lower()
+        blocked_until = row.get("blocked_until")
+        # Автоблокировка за неверные пароли не обрывает уже открытые сессии,
+        # иначе подбором пароля можно выбить пользователя из системы.
+        blocked = (
+            bool(row.get("is_blocked"))
+            and row.get("block_reason") != "too_many_failed_attempts"
+            and (blocked_until is None or blocked_until > datetime.utcnow())
+        )
+        state = {"role": role if role in ALL_ROLES else ROLE_STAFF, "blocked": blocked}
+
+    # Отсутствие пользователя не кэшируется: иначе пересозданный или впервые вошедший
+    # пользователь получал бы 401 до истечения TTL
+    if state is not None:
+        with _account_state_lock:
+            if generation == _account_state_generation:
+                _account_state_cache[key] = (now + ACCOUNT_STATE_CACHE_SECONDS, state)
+    return state
 
 
 def require_roles(*allowed_roles: str):

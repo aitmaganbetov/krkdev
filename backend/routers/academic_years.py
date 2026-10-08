@@ -3,6 +3,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, field_validator
 from sqlalchemy import func, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -106,8 +107,13 @@ def create_academic_year(
     exists = db.execute(text("SELECT 1 FROM academic_years WHERE name = :name"), {"name": body.name}).first()
     if exists:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Учебный год {body.name} уже есть")
-    db.execute(text("INSERT INTO academic_years (name) VALUES (:name)"), {"name": body.name})
-    db.commit()
+    try:
+        db.execute(text("INSERT INTO academic_years (name) VALUES (:name)"), {"name": body.name})
+        db.commit()
+    except IntegrityError:
+        # Параллельный запрос успел создать тот же год между проверкой и вставкой
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Учебный год {body.name} уже есть")
     audit_event(
         action="admin.academic_years.create",
         outcome="success",

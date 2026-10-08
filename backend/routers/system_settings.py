@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from services import ROLE_ADMIN, require_roles
 from services.audit_log import audit_event
+from services.secret_box import encrypt_secret, decode_ldap_settings
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -45,8 +46,47 @@ class LdapSettings(BaseModel):
     server_url: str = ""
     base_dn: str = ""
     bind_dn: str = ""
+    # Пустой пароль при сохранении и тесте означает «оставить сохранённый»
     bind_password: str = ""
     certificate_key: str = ""
+
+
+class LdapSettingsOut(BaseModel):
+    # Пароль bind-учётки наружу не отдаётся, только признак, что он задан
+    server_url: str = ""
+    base_dn: str = ""
+    bind_dn: str = ""
+    bind_password: str = ""
+    bind_password_configured: bool = False
+    certificate_key: str = ""
+
+
+def _load_stored_ldap(db: Session) -> dict:
+    row = db.execute(
+        text("SELECT value_text FROM system_settings WHERE `key` = 'ldap' LIMIT 1")
+    ).mappings().first()
+    if not row:
+        return {}
+    data = json.loads(row["value_text"])
+    if not isinstance(data, dict):
+        return {}
+    if "server_url" not in data:
+        host = (data.get("host") or "").strip()
+        if host:
+            scheme = "ldaps" if data.get("use_ssl") else "ldap"
+            port = int(data.get("port") or (636 if data.get("use_ssl") else 389))
+            data["server_url"] = f"{scheme}://{host}:{port}"
+    return decode_ldap_settings(data)
+
+
+def _ldap_out(data: dict) -> LdapSettingsOut:
+    return LdapSettingsOut(
+        server_url=data.get("server_url") or "",
+        base_dn=data.get("base_dn") or "",
+        bind_dn=data.get("bind_dn") or "",
+        bind_password_configured=bool(data.get("bind_password")),
+        certificate_key=data.get("certificate_key") or "",
+    )
 
 
 def _parse_ldap_server_url(server_url: str) -> tuple[str, int, bool]:
@@ -88,33 +128,19 @@ def _ensure_settings_table(db: Session) -> None:
     db.commit()
 
 
-@router.get("/ldap", response_model=LdapSettings)
+@router.get("/ldap", response_model=LdapSettingsOut)
 def get_ldap_settings(
     db: Session = Depends(get_db),
     _: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
 ):
     try:
         _ensure_settings_table(db)
-        row = db.execute(
-            text("SELECT value_text FROM system_settings WHERE `key` = 'ldap' LIMIT 1")
-        ).mappings().first()
-
-        if not row:
-            return LdapSettings()
-
-        data = json.loads(row["value_text"])
-        if isinstance(data, dict) and "server_url" not in data:
-            host = (data.get("host") or "").strip()
-            if host:
-                scheme = "ldaps" if data.get("use_ssl") else "ldap"
-                port = int(data.get("port") or (636 if data.get("use_ssl") else 389))
-                data["server_url"] = f"{scheme}://{host}:{port}"
-        return LdapSettings(**data)
+        return _ldap_out(_load_stored_ldap(db))
     except (SQLAlchemyError, ValueError, TypeError) as exc:
         raise HTTPException(status_code=500, detail="Не удалось загрузить LDAP настройки") from exc
 
 
-@router.put("/ldap", response_model=LdapSettings)
+@router.put("/ldap", response_model=LdapSettingsOut)
 def save_ldap_settings(
     body: LdapSettings,
     db: Session = Depends(get_db),
@@ -122,7 +148,11 @@ def save_ldap_settings(
 ):
     try:
         _ensure_settings_table(db)
-        payload = body.model_dump()
+        payload = body.model_dump(exclude={"bind_password"})
+        bind_password = body.bind_password
+        if not bind_password:
+            bind_password = _load_stored_ldap(db).get("bind_password") or ""
+        payload["bind_password_encrypted"] = encrypt_secret(bind_password)
 
         db.execute(
             text("""
@@ -139,7 +169,7 @@ def save_ldap_settings(
             actor=context.get("username"),
             details={"has_server_url": bool((body.server_url or "").strip())},
         )
-        return body
+        return _ldap_out({**payload, "bind_password": bind_password})
     except SQLAlchemyError as exc:
         db.rollback()
         audit_event(
@@ -154,8 +184,16 @@ def save_ldap_settings(
 @router.post("/ldap/test", response_model=LdapTestResult)
 def test_ldap_settings(
     body: LdapSettings,
+    db: Session = Depends(get_db),
     context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
 ):
+    if not body.bind_password:
+        try:
+            _ensure_settings_table(db)
+            stored_password = _load_stored_ldap(db).get("bind_password") or ""
+        except (SQLAlchemyError, ValueError, TypeError):
+            stored_password = ""
+        body = body.model_copy(update={"bind_password": stored_password})
     try:
         host, port, use_ssl = _parse_ldap_server_url(body.server_url)
     except ValueError as exc:
@@ -187,13 +225,13 @@ def test_ldap_settings(
             if not use_ssl:
                 return LdapTestResult(success=False, message="Используйте ldaps:// URL для безопасного подключения")
 
-            context = ssl.create_default_context()
+            ssl_ctx = ssl.create_default_context()
             certificate_key = body.certificate_key.strip()
 
             if certificate_key:
-                context.load_verify_locations(cadata=certificate_key)
+                ssl_ctx.load_verify_locations(cadata=certificate_key)
 
-            with context.wrap_socket(raw_socket, server_hostname=host) as secured_socket:
+            with ssl_ctx.wrap_socket(raw_socket, server_hostname=host) as secured_socket:
                 cipher = secured_socket.cipher()
                 cipher_name = cipher[0] if cipher else "unknown"
                 tls_details = f"{host}:{port}, cipher={cipher_name}"

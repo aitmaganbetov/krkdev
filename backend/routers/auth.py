@@ -24,30 +24,70 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 LOGIN_ATTEMPT_WINDOW_SECONDS = int(os.getenv("LOGIN_ATTEMPT_WINDOW_SECONDS", "300"))
 LOGIN_MAX_FAILED_ATTEMPTS = int(os.getenv("LOGIN_MAX_FAILED_ATTEMPTS", "5"))
+# Лимит на IP выше лимита на пару: за NAT/прокси университета несколько человек делят один адрес
+LOGIN_MAX_FAILED_PER_IP = int(os.getenv("LOGIN_MAX_FAILED_PER_IP", "50"))
 LOGIN_LOCKOUT_SECONDS = int(os.getenv("LOGIN_LOCKOUT_SECONDS", "900"))
-AUTH_COOKIE_SECURE = (os.getenv("AUTH_COOKIE_SECURE", "false").strip().lower() in {"1", "true", "yes", "on"})
+AUTH_COOKIE_SECURE = (os.getenv("AUTH_COOKIE_SECURE", "true").strip().lower() in {"1", "true", "yes", "on"})
 AUTH_COOKIE_SAMESITE = (os.getenv("AUTH_COOKIE_SAMESITE", "lax").strip().lower() or "lax")
 
+# Неудачные попытки считаются по паре «логин + IP» и по IP, а не по одному логину:
+# иначе любой мог бы заблокировать чужую учётную запись (в том числе admin), просто
+# вводя неверный пароль. Блокируется источник подбора, сама учётная запись — нет.
+# Счётчики в памяти процесса (backend запускается одним воркером uvicorn).
 _failed_attempts: dict[str, deque[datetime]] = defaultdict(deque)
+_locked_until: dict[str, datetime] = {}
 _attempts_lock = Lock()
 
 
-def _make_attempt_key(username: str, client_ip: str) -> str:
+def _attempt_keys(username: str, client_ip: str) -> tuple[str, str]:
     normalized_username = (username or "").strip().lower()
-    return normalized_username or (client_ip or "unknown").strip()
+    ip = (client_ip or "unknown").strip()
+    return f"user:{normalized_username}|ip:{ip}", f"ip:{ip}"
 
 
-def _register_failed_attempt(key: str, now: datetime) -> bool:
-    window_start = now - timedelta(seconds=LOGIN_ATTEMPT_WINDOW_SECONDS)
+def _is_rate_limited(keys: tuple[str, ...], now: datetime) -> bool:
     with _attempts_lock:
-        attempts = _failed_attempts[key]
-        while attempts and attempts[0] < window_start:
-            attempts.popleft()
-        attempts.append(now)
-        if len(attempts) >= LOGIN_MAX_FAILED_ATTEMPTS:
-            attempts.clear()
-            return True
+        for key in keys:
+            until = _locked_until.get(key)
+            if until is None:
+                continue
+            if now < until:
+                return True
+            _locked_until.pop(key, None)
         return False
+
+
+def _register_failed_attempt(pair_key: str, ip_key: str, now: datetime) -> bool:
+    """Регистрирует неудачную попытку; True — источник заблокирован на LOGIN_LOCKOUT_SECONDS."""
+    window_start = now - timedelta(seconds=LOGIN_ATTEMPT_WINDOW_SECONDS)
+    locked = False
+    with _attempts_lock:
+        for key, limit in ((pair_key, LOGIN_MAX_FAILED_ATTEMPTS), (ip_key, LOGIN_MAX_FAILED_PER_IP)):
+            attempts = _failed_attempts[key]
+            while attempts and attempts[0] < window_start:
+                attempts.popleft()
+            attempts.append(now)
+            if len(attempts) >= limit:
+                attempts.clear()
+                _locked_until[key] = now + timedelta(seconds=LOGIN_LOCKOUT_SECONDS)
+                locked = True
+        # Ограничиваем рост словаря при переборе множества логинов
+        if len(_failed_attempts) > 10000:
+            for key in [k for k, v in _failed_attempts.items() if not v or v[-1] < window_start]:
+                _failed_attempts.pop(key, None)
+        if len(_locked_until) > 10000:
+            for key in [k for k, until in _locked_until.items() if until <= now]:
+                _locked_until.pop(key, None)
+    return locked
+
+
+def _block_message(reason: str | None, blocked_until: datetime | None) -> str:
+    # too_many_failed_attempts остаётся только у старых автоблокировок, созданных до перехода на лимит по IP
+    if reason == "too_many_failed_attempts":
+        return "Слишком много попыток входа. Попробуйте позже."
+    if blocked_until:
+        return "Пользователь временно заблокирован администратором"
+    return "Пользователь заблокирован администратором"
 
 
 def _clear_attempts(key: str) -> None:
@@ -75,7 +115,12 @@ def _read_user_block_state(db: Session, username: str, now: datetime) -> tuple[b
     if not is_blocked:
         return False, reason, blocked_until
 
-    if blocked_until and now >= blocked_until:
+    # blocked_until хранится как naive UTC (UTC_TIMESTAMP), сравниваем в той же форме
+    now_utc = now.astimezone(timezone.utc).replace(tzinfo=None) if now.tzinfo else now
+    if blocked_until is not None and blocked_until.tzinfo is not None:
+        blocked_until = blocked_until.astimezone(timezone.utc).replace(tzinfo=None)
+
+    if blocked_until and now_utc >= blocked_until:
         db.execute(
             text("""
             UPDATE users
@@ -90,26 +135,6 @@ def _read_user_block_state(db: Session, username: str, now: datetime) -> tuple[b
         return False, None, None
 
     return True, reason, blocked_until
-
-
-def _apply_temporary_user_lock(db: Session, username: str, reason: str) -> None:
-    if not username:
-        return
-    db.execute(
-        text("""
-        UPDATE users
-        SET is_blocked = 1,
-            blocked_until = DATE_ADD(UTC_TIMESTAMP(), INTERVAL :lock_seconds SECOND),
-            block_reason = :reason
-        WHERE username = :username
-        """),
-        {
-            "username": username,
-            "lock_seconds": LOGIN_LOCKOUT_SECONDS,
-            "reason": reason[:255],
-        },
-    )
-    db.commit()
 
 
 def _extract_access_token(request: Request) -> str | None:
@@ -183,13 +208,27 @@ def _resolve_me_context(request: Request, db: Session) -> dict[str, str]:
 def login(body: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
     now = datetime.now(timezone.utc)
     client_ip = get_client_ip(request)
-    attempt_key = _make_attempt_key(body.username, client_ip)
+    pair_key, ip_key = _attempt_keys(body.username, client_ip)
     username = (body.username or "").strip().lower()
+
+    if _is_rate_limited((pair_key, ip_key), now):
+        audit_event(
+            action="auth.login",
+            outcome="blocked",
+            actor=username,
+            details={"ip": client_ip, "reason": "rate_limited"},
+            db=db,
+            ip_address=client_ip,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Слишком много попыток входа. Попробуйте позже.",
+        )
+
     _ensure_users_table(db)
 
     blocked, block_reason, blocked_until = _read_user_block_state(db, username, now)
     if blocked:
-        is_temporary_lock = bool(blocked_until)
         audit_event(
             action="auth.login",
             outcome="blocked",
@@ -204,15 +243,35 @@ def login(body: LoginRequest, request: Request, response: Response, db: Session 
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=("Слишком много попыток входа. Попробуйте позже." if is_temporary_lock else "Пользователь заблокирован администратором"),
+            detail=_block_message(block_reason, blocked_until),
         )
 
     authenticated, normalized_username, source, role = authenticate_user_details(body.username, body.password)
 
-    if not authenticated:
-        blocked = _register_failed_attempt(attempt_key, now)
+    # Блокировка ищется по введённому логину, а LDAP приводит его к каноническому
+    # (a.petrov -> a.petrov@domain): проверяем ещё раз уже по каноническому имени.
+    if authenticated and normalized_username != username:
+        blocked, block_reason, blocked_until = _read_user_block_state(db, normalized_username, now)
         if blocked:
-            _apply_temporary_user_lock(db, normalized_username, "too_many_failed_attempts")
+            audit_event(
+                action="auth.login",
+                outcome="blocked",
+                actor=normalized_username,
+                details={
+                    "ip": client_ip,
+                    "reason": block_reason or "user_blocked",
+                    "blocked_until": blocked_until.isoformat() if blocked_until else None,
+                },
+                db=db,
+                ip_address=client_ip,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=_block_message(block_reason, blocked_until),
+            )
+
+    if not authenticated:
+        if _register_failed_attempt(pair_key, ip_key, now):
             audit_event(
                 action="auth.login",
                 outcome="blocked",
@@ -241,7 +300,7 @@ def login(body: LoginRequest, request: Request, response: Response, db: Session 
             detail=detail,
         )
 
-    _clear_attempts(attempt_key)
+    _clear_attempts(pair_key)
     audit_event(
         action="auth.login",
         outcome="success",

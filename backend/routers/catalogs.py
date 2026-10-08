@@ -158,20 +158,9 @@ def get_basic_info_catalog(
     db: Session = Depends(get_db),
     _: str = Depends(get_current_user),
 ):
+    # Таблица academic_years создаётся при старте (ensure_rating_setup). Здесь только чтение:
+    # прежний INSERT IGNORE в GET возвращал удалённые администратором учебные годы.
     try:
-        db.execute(text("""
-            CREATE TABLE IF NOT EXISTS academic_years (
-                id INT PRIMARY KEY AUTO_INCREMENT,
-                name VARCHAR(20) NOT NULL UNIQUE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
-        """))
-        db.execute(
-            text("INSERT IGNORE INTO academic_years (name) VALUES (:name1), (:name2)"),
-            {"name1": "2025-2026", "name2": "2026-2027"},
-        )
-        db.commit()
-
         teachers_rows = db.execute(text("""
             SELECT tutor_id, full_name
             FROM tutors

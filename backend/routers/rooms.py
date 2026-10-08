@@ -1,6 +1,4 @@
 import asyncio
-import base64
-import hashlib
 import os
 import subprocess
 import uuid
@@ -16,7 +14,6 @@ from urllib.request import (
     urlopen,
 )
 
-from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
@@ -28,6 +25,7 @@ from models.room import Room
 from models.violation_evidence import ViolationEvidence
 from services import ROLE_ADMIN, ROLE_INSPECTOR, require_roles
 from services.audit_log import audit_event
+from services.secret_box import decrypt_secret, encrypt_secret
 
 router = APIRouter(prefix="/rooms", tags=["rooms"])
 
@@ -95,25 +93,9 @@ class CameraEvidenceOut(BaseModel):
     url: str
 
 
-def _fernet() -> Fernet:
-    secret = os.getenv("SECRET_KEY", "").encode("utf-8")
-    if not secret:
-        raise RuntimeError("SECRET_KEY is required")
-    key = base64.urlsafe_b64encode(hashlib.sha256(secret).digest())
-    return Fernet(key)
-
-
-def _encrypt_secret(value: str) -> str:
-    return _fernet().encrypt(value.encode("utf-8")).decode("ascii") if value else ""
-
-
-def _decrypt_secret(value: str) -> str:
-    if not value:
-        return ""
-    try:
-        return _fernet().decrypt(value.encode("ascii")).decode("utf-8")
-    except InvalidToken:
-        return ""
+# Шифрование секретов в БД — общий модуль (камеры, AI, LDAP)
+_encrypt_secret = encrypt_secret
+_decrypt_secret = decrypt_secret
 
 
 def _serialize(room: Room) -> RoomOut:
@@ -214,7 +196,8 @@ def update_room(
     room = db.get(Room, room_id)
     if not room:
         raise HTTPException(status_code=404, detail="Кабинет не найден")
-    for key, value in body.model_dump(exclude={"camera_api_key"}).items():
+    # Только переданные поля: иначе частичный PATCH обнулял бы остальные значениями по умолчанию
+    for key, value in body.model_dump(exclude={"camera_api_key"}, exclude_unset=True).items():
         setattr(room, key, value)
     room.name = body.name.strip()
     if body.camera_api_key:

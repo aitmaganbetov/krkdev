@@ -178,7 +178,7 @@ def update_record(
                 "teacher": result.teacher,
                 "subject": result.subject,
                 "status": result.status,
-                "changed_fields": list(body.dict(exclude_unset=True).keys()),
+                "changed_fields": list(body.model_dump(exclude_unset=True).keys()),
             },
             db=db,
             ip_address=get_client_ip(request),
@@ -234,7 +234,7 @@ def submit_record(
 ):
     """Staff submits their record"""
     try:
-        record = record_service.get_record_by_id(db, record_id)
+        record = record_service.get_record_by_id(db, record_id, for_update=True)
         
         # Only owner can submit (if already assigned) or self-submit (if not assigned)
         if record.submitted_by and not _is_owner(record.submitted_by, current_user["username"]):
@@ -290,7 +290,7 @@ def send_to_rework(
 ):
     """Admin/Inspector sends record back to rework"""
     try:
-        record = record_service.get_record_by_id(db, record_id)
+        record = record_service.get_record_by_id(db, record_id, for_update=True)
         
         # Can only send submitted records to rework
         if record.status != "submitted":
@@ -339,7 +339,7 @@ def accept_record(
 ):
     """Admin/Inspector accepts record"""
     try:
-        record = record_service.get_record_by_id(db, record_id)
+        record = record_service.get_record_by_id(db, record_id, for_update=True)
         
         # Can only accept submitted or rework records
         if record.status not in ["submitted", "rework"]:

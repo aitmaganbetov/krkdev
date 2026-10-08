@@ -1,10 +1,11 @@
-fastapi>=0.104.0
-uvicorn[standard]>=0.24.0
-sqlalchemy>=2.0.0
-pymysql>=1.1.0
-python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.4
-python-multipart>=0.0.6
-python-dotenv>=1.0.0
-cryptography>=41.0.0
-ldap3>=2.9.1
+# Версии закреплены по проверенной сборке: воспроизводимый образ без случайных обновлений.
+# python-jose >= 3.4.0 обязателен (CVE-2024-33663, CVE-2024-33664).
+fastapi==0.140.13
+uvicorn[standard]==0.52.0
+sqlalchemy==2.0.51
+pymysql==1.2.0
+python-jose[cryptography]==3.5.0
+python-multipart==0.0.32
+python-dotenv==1.2.2
+cryptography==49.0.0
+ldap3==2.9.1

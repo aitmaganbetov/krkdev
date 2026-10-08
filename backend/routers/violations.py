@@ -105,15 +105,17 @@ def create_violation(
     payload = body.model_dump(exclude={"evidence_ids"})
     violation = Violation(**payload, created_by=context.get("username") or "unknown")
     db.add(violation)
-    db.commit()
-    db.refresh(violation)
+    # Нарушение и привязка доказательств — одна транзакция: без этого при сбое
+    # оставалось нарушение без доказательств
+    db.flush()
     if body.evidence_ids:
         db.query(ViolationEvidence).filter(
             ViolationEvidence.id.in_(body.evidence_ids),
             ViolationEvidence.violation_id.is_(None),
             ViolationEvidence.created_by == (context.get("username") or "unknown"),
         ).update({"violation_id": violation.id}, synchronize_session=False)
-        db.commit()
+    db.commit()
+    db.refresh(violation)
     audit_event(
         "monitoring.violation.create",
         actor=context.get("username"),
@@ -121,10 +123,12 @@ def create_violation(
         db=db,
     )
     result = ViolationOut.model_validate(violation)
-    result.evidence_ids = body.evidence_ids
+    # Только реально привязанные доказательства (чужие и занятые id не привязываются)
+    evidence_rows = db.query(ViolationEvidence).filter(ViolationEvidence.violation_id == violation.id).all()
+    result.evidence_ids = [row.id for row in evidence_rows]
     result.evidence = [
         EvidenceSummary(id=row.id, media_type=row.media_type, url=f"/api/violations/evidence/{row.id}")
-        for row in db.query(ViolationEvidence).filter(ViolationEvidence.violation_id == violation.id).all()
+        for row in evidence_rows
     ]
     _set_act_url(result, violation)
     return result
@@ -140,7 +144,8 @@ def review_violation(
     decision = body.status.strip().lower()
     if decision not in {"confirmed", "rejected"}:
         raise HTTPException(status_code=400, detail="Статус должен быть confirmed или rejected")
-    violation = db.get(Violation, violation_id)
+    # Блокировка строки: два одновременных решения не должны оба пройти проверку pending
+    violation = db.get(Violation, violation_id, with_for_update=True)
     if not violation:
         raise HTTPException(status_code=404, detail="Нарушение не найдено")
     if violation.status != "pending":
@@ -170,14 +175,22 @@ def review_violation(
     return result
 
 
+def _remove_quietly(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 @router.post("/{violation_id}/act", response_model=ViolationOut)
-async def upload_violation_act(
+def upload_violation_act(
     violation_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
 ):
-    violation = db.get(Violation, violation_id)
+    # Синхронный обработчик (threadpool): БД и диск здесь блокирующие, в async они стопорили бы event loop
+    violation = db.get(Violation, violation_id, with_for_update=True)
     if not violation:
         raise HTTPException(status_code=404, detail="Нарушение не найдено")
     if violation.status != "pending":
@@ -185,7 +198,7 @@ async def upload_violation_act(
     original_name = (file.filename or "").strip()
     if not original_name.lower().endswith(".pdf") or file.content_type not in {"application/pdf", "application/octet-stream"}:
         raise HTTPException(status_code=400, detail="Можно прикрепить только PDF-файл")
-    content = await file.read(20 * 1024 * 1024 + 1)
+    content = file.file.read(20 * 1024 * 1024 + 1)
     if len(content) > 20 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Размер PDF не должен превышать 20 МБ")
     if not content.startswith(b"%PDF-"):
@@ -196,10 +209,19 @@ async def upload_violation_act(
     path = os.path.join(act_root, filename)
     with open(path, "wb") as target:
         target.write(content)
+    previous_filename = violation.act_filename
     violation.act_filename = filename
     violation.act_uploaded_by = context.get("username") or "unknown"
     violation.act_uploaded_at = datetime.now(timezone.utc)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        _remove_quietly(path)
+        raise
+    # Заменённый АКТ больше нигде не используется
+    if previous_filename and previous_filename != filename:
+        _remove_quietly(os.path.join(act_root, os.path.basename(previous_filename)))
     db.refresh(violation)
     result = ViolationOut.model_validate(violation)
     evidence_rows = db.query(ViolationEvidence).filter(ViolationEvidence.violation_id == violation.id).all()

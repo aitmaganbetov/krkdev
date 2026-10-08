@@ -5,6 +5,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -238,7 +239,12 @@ def create_template(
     db.add(template)
     # Год должен появиться в выпадающем списке формы записи.
     db.execute(text("INSERT IGNORE INTO academic_years (name) VALUES (:name)"), {"name": body.academic_year})
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Параллельный запрос успел создать справочник того же года
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Справочник для этого учебного года уже есть")
     db.refresh(template)
 
     audit_event(

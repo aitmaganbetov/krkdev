@@ -1,6 +1,7 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from migrations import import_faculties, migrate_records_submitted_by
+import logging
 import os
 from database import engine, Base
 from routers import auth_router, catalogs_router, records_router, system_settings_router, users_router, audit_logs_router, rooms_router, violations_router, ai_router, rating_templates_router, academic_years_router
@@ -83,17 +84,23 @@ app.include_router(academic_years_router, prefix="/api")
 def health():
     return {"status": "ok"}
 
+MIGRATION_OK_STATUSES = {"success", "ok"}
+
+
 @app.post("/admin/migrate/faculties")
 def migrate_faculties(context: dict = Depends(require_roles(ROLE_ADMIN))):
     """Admin endpoint to import faculties from remote database"""
     result = import_faculties()
-    outcome = "success" if result.get("status") == "success" else "failure"
+    outcome = "success" if result.get("status") in MIGRATION_OK_STATUSES else "failure"
     audit_event(
         action="admin.migrate.faculties",
         outcome=outcome,
         actor=context.get("username"),
         details={"status": result.get("status"), "count": result.get("count")},
     )
+    if outcome == "failure":
+        logging.error("Faculties migration failed: %s", result.get("message"))
+        raise HTTPException(status_code=502, detail="Не удалось импортировать факультеты")
     return result
 
 
@@ -101,11 +108,14 @@ def migrate_faculties(context: dict = Depends(require_roles(ROLE_ADMIN))):
 def migrate_records_submitted_by_column(context: dict = Depends(require_roles(ROLE_ADMIN))):
     """Admin endpoint to add records.submitted_by column if needed"""
     result = migrate_records_submitted_by()
-    outcome = "success" if result.get("status") == "success" else "failure"
+    outcome = "success" if result.get("status") in MIGRATION_OK_STATUSES else "failure"
     audit_event(
         action="admin.migrate.records-submitted-by",
         outcome=outcome,
         actor=context.get("username"),
         details={"status": result.get("status")},
     )
+    if outcome == "failure":
+        logging.error("records.submitted_by migration failed: %s", result.get("message"))
+        raise HTTPException(status_code=500, detail="Не удалось выполнить миграцию")
     return result

@@ -17,7 +17,7 @@ def _validate_non_empty_string(v: str, field_name: str) -> str:
     return v.strip()
 
 
-class RecordBase(BaseModel):
+class RecordFields(BaseModel):
     teacher: str
     subject: str
     faculty: str
@@ -33,7 +33,11 @@ class RecordBase(BaseModel):
     academic_year: str
     ratings: dict[str, int]
     comment: Optional[str] = None
-    status: str = "draft"
+
+
+class RecordBase(RecordFields):
+    # Статус во входных данных не принимается: новая запись всегда draft,
+    # дальше статус меняется только через /submit, /send-to-rework, /accept.
 
     @field_validator("ratings")
     @classmethod
@@ -79,7 +83,6 @@ class RecordUpdate(BaseModel):
     academic_year: Optional[str] = None
     ratings: Optional[dict[str, int]] = None
     comment: Optional[str] = None
-    status: Optional[str] = None
 
     @field_validator("ratings")
     @classmethod
@@ -107,8 +110,10 @@ class RecordUpdate(BaseModel):
 
 
 
-class RecordOut(RecordBase):
+class RecordOut(RecordFields):
+    # Без входных валидаторов: ответ не должен падать на исторических данных
     id: int
+    status: str
     attendance: float
     score: float
     is_problem: bool = False

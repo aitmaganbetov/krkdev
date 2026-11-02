@@ -15,3 +15,19 @@ ssl/
 
 # Скриншоты аудита сняты с реальной БД (ФИО, логины сотрудников) — только локально, в git не публикуются
 docs/redesign/screenshots/
+.playwright-mcp/
+security-reports/
+*.docx
+
+# Документы университета (приказы, графики, сверки с Platonus) и данные из них с ФИО — только локально
+/*.pdf
+/*.xlsx
+backend/data/
+
+# Локальные инструменты
+/node_modules/
+/package.json
+/package-lock.json
+.mcp.json
+graphify-out/
+.claude/

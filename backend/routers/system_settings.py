@@ -7,14 +7,21 @@ import sys
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from database import get_db
-from services import ROLE_ADMIN, require_roles
+from services import ROLE_SUPERADMIN, require_roles
 from services.audit_log import audit_event
+from services.camera_settings import (
+    LIVE_MAX_STREAMS_RANGE,
+    active_live_streams,
+    default_live_max_streams,
+    get_live_max_streams,
+    save_live_max_streams,
+)
 from services.secret_box import encrypt_secret, decode_ldap_settings
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -117,24 +124,12 @@ class LdapTestResult(BaseModel):
     details: str | None = None
 
 
-def _ensure_settings_table(db: Session) -> None:
-    db.execute(text("""
-        CREATE TABLE IF NOT EXISTS system_settings (
-            `key` VARCHAR(128) PRIMARY KEY,
-            value_text LONGTEXT NOT NULL,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
-    """))
-    db.commit()
-
-
 @router.get("/ldap", response_model=LdapSettingsOut)
 def get_ldap_settings(
     db: Session = Depends(get_db),
-    _: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+    _: dict[str, str] = Depends(require_roles(ROLE_SUPERADMIN)),
 ):
     try:
-        _ensure_settings_table(db)
         return _ldap_out(_load_stored_ldap(db))
     except (SQLAlchemyError, ValueError, TypeError) as exc:
         raise HTTPException(status_code=500, detail="Не удалось загрузить LDAP настройки") from exc
@@ -144,10 +139,9 @@ def get_ldap_settings(
 def save_ldap_settings(
     body: LdapSettings,
     db: Session = Depends(get_db),
-    context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+    context: dict[str, str] = Depends(require_roles(ROLE_SUPERADMIN)),
 ):
     try:
-        _ensure_settings_table(db)
         payload = body.model_dump(exclude={"bind_password"})
         bind_password = body.bind_password
         if not bind_password:
@@ -185,11 +179,10 @@ def save_ldap_settings(
 def test_ldap_settings(
     body: LdapSettings,
     db: Session = Depends(get_db),
-    context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+    context: dict[str, str] = Depends(require_roles(ROLE_SUPERADMIN)),
 ):
     if not body.bind_password:
         try:
-            _ensure_settings_table(db)
             stored_password = _load_stored_ldap(db).get("bind_password") or ""
         except (SQLAlchemyError, ValueError, TypeError):
             stored_password = ""
@@ -318,3 +311,50 @@ def test_ldap_settings(
             message="LDAP клиент недоступен",
             details=str(exc),
         )
+
+class CameraSettings(BaseModel):
+    live_max_streams: int = Field(ge=LIVE_MAX_STREAMS_RANGE[0], le=LIVE_MAX_STREAMS_RANGE[1])
+
+
+class CameraSettingsOut(CameraSettings):
+    default_live_max_streams: int
+    active_live_streams: int
+    cpu_count: int
+
+
+def _camera_out(db: Session) -> CameraSettingsOut:
+    return CameraSettingsOut(
+        live_max_streams=get_live_max_streams(db),
+        default_live_max_streams=default_live_max_streams(),
+        active_live_streams=active_live_streams(),
+        cpu_count=os.cpu_count() or 1,
+    )
+
+
+@router.get("/cameras", response_model=CameraSettingsOut)
+def get_camera_settings(
+    db: Session = Depends(get_db),
+    _: dict[str, str] = Depends(require_roles(ROLE_SUPERADMIN)),
+):
+    return _camera_out(db)
+
+
+@router.put("/cameras", response_model=CameraSettingsOut)
+def save_camera_settings(
+    body: CameraSettings,
+    db: Session = Depends(get_db),
+    context: dict[str, str] = Depends(require_roles(ROLE_SUPERADMIN)),
+):
+    previous = get_live_max_streams(db)
+    try:
+        save_live_max_streams(db, body.live_max_streams)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Не удалось сохранить настройки камер") from exc
+    audit_event(
+        action="admin.settings.cameras.save",
+        outcome="success",
+        actor=context.get("username"),
+        details={"live_max_streams": body.live_max_streams, "previous": previous},
+    )
+    return _camera_out(db)

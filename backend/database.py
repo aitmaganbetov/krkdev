@@ -36,10 +36,14 @@ def _build_database_url() -> str:
 
 DATABASE_URL = _build_database_url()
 
+# Синхронные обработчики FastAPI выполняются в пуле до 40 потоков: при 5 + 10 соединениях по умолчанию
+# запросы под нагрузкой ждали свободного соединения (фоновая синхронизация расписания держит одно)
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
     pool_recycle=3600,
+    pool_size=int(os.getenv("DB_POOL_SIZE", "10")),
+    max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "20")),
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

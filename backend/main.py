@@ -1,19 +1,16 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from migrations import import_faculties, migrate_records_submitted_by
+from migrations import ensure_catalog_tables, ensure_settings_table
 import logging
 import os
 from database import engine, Base
-from routers import auth_router, catalogs_router, records_router, system_settings_router, users_router, audit_logs_router, rooms_router, violations_router, ai_router, rating_templates_router, academic_years_router
-from services import require_roles, ROLE_ADMIN
-from services.audit_log import audit_event
+from routers import auth_router, catalogs_router, records_router, system_settings_router, users_router, audit_logs_router, rooms_router, violations_router, ai_router, rating_templates_router, academic_years_router, peer_visits_router, notifications_router, peer_visit_schedule_router, schedule_router, committee_router, signing_router
 
-# Import all models to ensure they are registered with Base
-import models.record  # noqa: F401
-import models.audit_log  # noqa: F401
-import models.room  # noqa: F401
-import models.violation  # noqa: F401
-import models.violation_evidence  # noqa: F401
+# Все модели регистрируются в Base до create_all: пакет models и модели вне его __init__
+import models  # noqa: F401
+import models.schedule_lesson  # noqa: F401
+import models.room_inventory  # noqa: F401
+import models.attendance  # noqa: F401
 import models.rating_template  # noqa: F401
 from services.rating_template_service import ensure_rating_setup
 
@@ -43,14 +40,83 @@ CORS_ALLOW_HEADERS = _read_csv_env(
 try:
     Base.metadata.create_all(bind=engine)
 except Exception as e:
-    import logging
     logging.error(f"Failed to create database tables: {e}")
+
+try:
+    ensure_settings_table(engine)
+except Exception as e:
+    logging.error(f"Failed to prepare system settings table: {e}")
+
+try:
+    from services.auth_service import ensure_auth_schema
+    ensure_auth_schema()
+except Exception as e:
+    logging.error(f"Failed to prepare users/roles tables: {e}")
+
+try:
+    from services.peer_visit_schedule_service import ensure_schedule_schema
+    ensure_schedule_schema(engine)
+except Exception as e:
+    logging.error(f"Failed to prepare peer visit schedule: {e}")
+
+try:
+    ensure_catalog_tables(engine)
+except Exception as e:
+    logging.error(f"Failed to prepare catalog tables: {e}")
+
+try:
+    from services.people_service import ensure_people_tables
+    ensure_people_tables(engine)
+except Exception as e:
+    logging.error(f"Failed to prepare people profile tables: {e}")
+
+try:
+    from database import SessionLocal
+    from services.faculty_scope import backfill_violation_faculties
+    _session = SessionLocal()
+    try:
+        backfill_violation_faculties(_session)
+    finally:
+        _session.close()
+except Exception as e:
+    logging.error(f"Failed to backfill violation faculties: {e}")
+
+try:
+    from services.schedule_service import ensure_schedule_schema
+    ensure_schedule_schema(engine)
+except Exception as e:
+    logging.error(f"Failed to prepare schedule tables: {e}")
+
+try:
+    from services.committee_service import ensure_committee_schema
+    ensure_committee_schema(engine)
+except Exception as e:
+    logging.error(f"Failed to prepare committee tables: {e}")
+
+# Автоматические роли: член комитета КРК, преподаватель, студент (после миграций справочников)
+try:
+    from services.auth_service import sync_auto_roles
+    sync_auto_roles()
+except Exception as e:
+    logging.error(f"Failed to sync Platonus roles: {e}")
+
+try:
+    from services.room_sync_service import ensure_room_schema
+    ensure_room_schema(engine)
+except Exception as e:
+    logging.error(f"Failed to prepare rooms table: {e}")
 
 try:
     ensure_rating_setup(engine)
 except Exception as e:
-    import logging
     logging.error(f"Failed to prepare rating templates: {e}")
+
+# Индексы под запросы — после всех миграций таблиц
+try:
+    from services.db_indexes import ensure_performance_indexes
+    ensure_performance_indexes(engine)
+except Exception as e:
+    logging.error(f"Failed to prepare indexes: {e}")
 
 app = FastAPI(
     title="Sapa API — система ректорского контроля",
@@ -78,44 +144,23 @@ app.include_router(violations_router, prefix="/api")
 app.include_router(ai_router, prefix="/api")
 app.include_router(rating_templates_router, prefix="/api")
 app.include_router(academic_years_router, prefix="/api")
+app.include_router(peer_visits_router, prefix="/api")
+app.include_router(notifications_router, prefix="/api")
+app.include_router(peer_visit_schedule_router, prefix="/api")
+app.include_router(schedule_router, prefix="/api")
+app.include_router(committee_router, prefix="/api")
+app.include_router(signing_router, prefix="/api")
+
+# Быстрый вход под ролями — только dev (DEV_QUICK_LOGIN в docker-compose.dev.yml и не Secure-cookie)
+from routers.room_scan import router as room_scan_router
+app.include_router(room_scan_router, prefix="/api")
+
+from routers import dev_login as _dev_login
+if _dev_login.is_enabled():
+    logging.warning("DEV_QUICK_LOGIN: быстрый вход под ролями включён (только для dev)")
+    app.include_router(_dev_login.router, prefix="/api")
 
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
-
-MIGRATION_OK_STATUSES = {"success", "ok"}
-
-
-@app.post("/admin/migrate/faculties")
-def migrate_faculties(context: dict = Depends(require_roles(ROLE_ADMIN))):
-    """Admin endpoint to import faculties from remote database"""
-    result = import_faculties()
-    outcome = "success" if result.get("status") in MIGRATION_OK_STATUSES else "failure"
-    audit_event(
-        action="admin.migrate.faculties",
-        outcome=outcome,
-        actor=context.get("username"),
-        details={"status": result.get("status"), "count": result.get("count")},
-    )
-    if outcome == "failure":
-        logging.error("Faculties migration failed: %s", result.get("message"))
-        raise HTTPException(status_code=502, detail="Не удалось импортировать факультеты")
-    return result
-
-
-@app.post("/admin/migrate/records-submitted-by")
-def migrate_records_submitted_by_column(context: dict = Depends(require_roles(ROLE_ADMIN))):
-    """Admin endpoint to add records.submitted_by column if needed"""
-    result = migrate_records_submitted_by()
-    outcome = "success" if result.get("status") in MIGRATION_OK_STATUSES else "failure"
-    audit_event(
-        action="admin.migrate.records-submitted-by",
-        outcome=outcome,
-        actor=context.get("username"),
-        details={"status": result.get("status")},
-    )
-    if outcome == "failure":
-        logging.error("records.submitted_by migration failed: %s", result.get("message"))
-        raise HTTPException(status_code=500, detail="Не удалось выполнить миграцию")
-    return result

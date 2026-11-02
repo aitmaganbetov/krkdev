@@ -1,9 +1,10 @@
+import logging
 from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
 from fastapi import HTTPException, status, Depends, Request
 from fastapi.security import OAuth2PasswordBearer
 from dotenv import load_dotenv
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from database import SessionLocal
 from services.secret_box import decode_ldap_settings
 import hashlib
@@ -53,10 +54,37 @@ if not SECRET_KEY:
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 AUTH_COOKIE_NAME = (os.getenv("AUTH_COOKIE_NAME") or "krk_access_token").strip() or "krk_access_token"
 
+logger = logging.getLogger(__name__)
+
+# Суперадминистратор: все права, включая системные разделы (настройки, LDAP, кабинеты и камеры,
+# журнал аудита). Им становится встроенный аккаунт ADMIN_USERNAME; назначить роль может только он сам.
+ROLE_SUPERADMIN = "superadmin"
+# Администратор: рабочая область, дашборд, справочник и пользователи
 ROLE_ADMIN = "admin"
+# Инспектор КРК: расписание, записи КРК (проверка всех записей), комитет КРК, справочник вопросов и учебных лет
 ROLE_INSPECTOR = "inspector"
+# Инспектор взаимопосещения: расписание, отзывы о взаимопосещении (проверка всех отзывов), график взаимопосещения
+ROLE_PEER_INSPECTOR = "peer_inspector"
 ROLE_STAFF = "staff"
-ALL_ROLES = {ROLE_ADMIN, ROLE_INSPECTOR, ROLE_STAFF}
+# Деканат: работает только с данными своего факультета (users.faculty_id = faculties.FacultyID)
+ROLE_DEAN = "dean"
+# Пользователь: базовая роль с минимальными правами — уведомления, свои нарушения, свой план
+# взаимопосещений и отзывы по нему. Её получают новые пользователи; остальные роли назначает администратор.
+ROLE_USER = "user"
+# Студент: только отметка посещаемости по QR-коду аудитории и свои отметки. Назначается, если логин
+# совпадает с логином активного обучающегося Platonus (platonus_students).
+ROLE_STUDENT = "student"
+# Преподаватель: права базовой роли «Пользователь». Назначается, если логин есть в справочнике преподавателей Platonus.
+ROLE_TEACHER = "teacher"
+# Член комитета ректорского контроля: права «Сотрудника» (проверки занятий — свои записи КРК, расписание).
+# Назначается по составу действующего приказа о комитете (раздел «Комитет КРК», committee_service.py).
+ROLE_COMMITTEE = "committee"
+ALL_ROLES = {ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_INSPECTOR, ROLE_PEER_INSPECTOR, ROLE_STAFF, ROLE_DEAN, ROLE_USER, ROLE_TEACHER, ROLE_STUDENT, ROLE_COMMITTEE}
+# Роли, которые система выставляет сама (см. _AUTO_ROLE_SOURCES); остальные назначает администратор,
+# и автоматически они не меняются
+AUTO_ROLES = (ROLE_USER, ROLE_TEACHER, ROLE_STUDENT, ROLE_COMMITTEE)
+# Проводят проверки занятий и видят только свои записи КРК
+RECORD_AUTHOR_ROLES = (ROLE_STAFF, ROLE_COMMITTEE)
 
 
 def _import_ldap3_for_auth():
@@ -165,12 +193,21 @@ def _ensure_users_table(db) -> None:
     if not fk_exists:
         db.execute(text("ALTER TABLE users ADD CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES roles(id)"))
 
-    # Backfill existing users with staff role by default.
+    faculty_column = db.execute(text("""
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'faculty_id'
+        LIMIT 1
+    """)).first()
+    if not faculty_column:
+        # Факультет пользователя с ролью «Деканат» (faculties.FacultyID)
+        db.execute(text("ALTER TABLE users ADD COLUMN faculty_id INT NULL"))
+
+    # Пользователям без роли — базовая роль «Пользователь»
     db.execute(text("""
         UPDATE users
         SET role_id = (SELECT id FROM roles WHERE name = :role_name LIMIT 1)
         WHERE role_id IS NULL
-    """), {"role_name": ROLE_STAFF})
+    """), {"role_name": ROLE_USER})
     db.commit()
 
 
@@ -185,6 +222,10 @@ def _ensure_roles_table(db) -> None:
 
     db.execute(
         text("INSERT IGNORE INTO roles (name) VALUES (:name)"),
+        {"name": ROLE_SUPERADMIN},
+    )
+    db.execute(
+        text("INSERT IGNORE INTO roles (name) VALUES (:name)"),
         {"name": ROLE_ADMIN},
     )
     db.execute(
@@ -193,7 +234,31 @@ def _ensure_roles_table(db) -> None:
     )
     db.execute(
         text("INSERT IGNORE INTO roles (name) VALUES (:name)"),
+        {"name": ROLE_PEER_INSPECTOR},
+    )
+    db.execute(
+        text("INSERT IGNORE INTO roles (name) VALUES (:name)"),
         {"name": ROLE_STAFF},
+    )
+    db.execute(
+        text("INSERT IGNORE INTO roles (name) VALUES (:name)"),
+        {"name": ROLE_DEAN},
+    )
+    db.execute(
+        text("INSERT IGNORE INTO roles (name) VALUES (:name)"),
+        {"name": ROLE_USER},
+    )
+    db.execute(
+        text("INSERT IGNORE INTO roles (name) VALUES (:name)"),
+        {"name": ROLE_TEACHER},
+    )
+    db.execute(
+        text("INSERT IGNORE INTO roles (name) VALUES (:name)"),
+        {"name": ROLE_COMMITTEE},
+    )
+    db.execute(
+        text("INSERT IGNORE INTO roles (name) VALUES (:name)"),
+        {"name": ROLE_STUDENT},
     )
     db.commit()
 
@@ -201,7 +266,7 @@ def _ensure_roles_table(db) -> None:
 def _get_role_id(db, role_name: str) -> int | None:
     normalized = (role_name or "").strip().lower()
     if normalized not in ALL_ROLES:
-        normalized = ROLE_STAFF
+        normalized = ROLE_USER
 
     row = db.execute(
         text("SELECT id FROM roles WHERE name = :name LIMIT 1"),
@@ -266,7 +331,7 @@ def _upsert_user(
     if password:
         password_hash, password_salt = _hash_password(password)
 
-    role_id = _get_role_id(db, role_name or ROLE_STAFF)
+    role_id = _get_role_id(db, role_name or ROLE_USER)
 
     db.execute(
         text("""
@@ -898,6 +963,160 @@ def _ldap_authenticate(username: str, password: str, settings: dict) -> tuple[bo
         return False, {}, "connection"
 
 
+# Источники автоматических ролей, от старшей к младшей: член действующего комитета ректорского контроля
+# (committee_members → tutors.login), преподаватель (tutors), обучающийся (platonus_students)
+_AUTO_ROLE_SOURCES = (
+    (ROLE_COMMITTEE, """SELECT LOWER(TRIM(t.login)) AS login FROM committee_members m
+        JOIN committee_orders o ON o.id = m.order_id AND o.is_active = 1
+        JOIN tutors t ON t.tutor_id = m.tutor_id WHERE TRIM(t.login) <> ''"""),
+    (ROLE_TEACHER, "SELECT LOWER(TRIM(login)) AS login FROM tutors WHERE TRIM(login) <> ''"),
+    (ROLE_STUDENT, "SELECT LOWER(TRIM(login)) AS login FROM platonus_students WHERE TRIM(login) <> ''"),
+)
+
+
+# Те же источники для проверки одного входа: сравнение по индексированному login без LOWER/TRIM —
+# tutors.login сравнивается без учёта регистра (unicode_ci), platonus_students.login хранится в нижнем регистре
+_AUTO_ROLE_LOOKUPS = (
+    (ROLE_COMMITTEE, """SELECT 1 FROM committee_members m
+        JOIN committee_orders o ON o.id = m.order_id AND o.is_active = 1
+        JOIN tutors t ON t.tutor_id = m.tutor_id WHERE t.login IN :logins LIMIT 1"""),
+    (ROLE_TEACHER, "SELECT 1 FROM tutors WHERE login IN :logins LIMIT 1"),
+    (ROLE_STUDENT, "SELECT 1 FROM platonus_students WHERE login IN :logins LIMIT 1"),
+)
+
+
+def _auto_role(db, usernames: list[str], current: str) -> str:
+    """Автоматическая роль для логинов (с доменом и без) по _AUTO_ROLE_LOOKUPS. Кого нет ни в одном источнике,
+    роль не меняется — кроме «Члена комитета»: исключённый из состава становится «Пользователем»."""
+    logins = sorted(({_short_ldap_username(name) for name in usernames if name}
+                     | {(name or "").strip().lower() for name in usernames if name}) - {""})
+    for role, query in _AUTO_ROLE_LOOKUPS:
+        try:
+            if logins and db.execute(
+                text(query).bindparams(bindparam("logins", expanding=True)),
+                {"logins": logins},
+            ).first():
+                return role
+        except Exception:
+            # Таблицы появляются после первой синхронизации справочников и расписания
+            db.rollback()
+    return ROLE_USER if current == ROLE_COMMITTEE else current
+
+
+def sync_auto_roles() -> int:
+    """Выставляет автоматические роли (AUTO_ROLES) всем учётным записям: член действующего комитета →
+    «Член комитета КРК», преподаватель → «Преподаватель», обучающийся → «Студент». Кого нет в источниках,
+    не трогает (неполная синхронизация не сбрасывает роли); исключённый из комитета становится «Пользователем».
+    Вызывается при старте, после синхронизации справочников и расписания и после изменения состава комитета.
+    Возвращает число изменённых учётных записей."""
+    db = SessionLocal()
+    try:
+        _ensure_users_table(db)
+        # Младшие источники читаются первыми, старшие перекрывают их для того же логина
+        role_by_login: dict[str, str] = {}
+        loaded = set()
+        for role, source in reversed(_AUTO_ROLE_SOURCES):
+            try:
+                logins = db.execute(text(source)).scalars().all()
+            except Exception:
+                db.rollback()
+                continue
+            loaded.add(role)
+            role_by_login.update(dict.fromkeys(logins, role))
+
+        users = db.execute(
+            text("SELECT u.username, r.name AS role_name FROM users u JOIN roles r ON r.id = u.role_id WHERE r.name IN :roles")
+            .bindparams(bindparam("roles", expanding=True)),
+            {"roles": list(AUTO_ROLES)},
+        ).mappings().all()
+        rank = {role: index for index, (role, _) in enumerate(_AUTO_ROLE_SOURCES)}
+        changes: dict[str, list[str]] = {}
+        for row in users:
+            found = {role_by_login.get(row["username"].lower()), role_by_login.get(_short_ldap_username(row["username"]))} - {None}
+            target = min(found, key=rank.get) if found else None
+            if target is None and row["role_name"] == ROLE_COMMITTEE and ROLE_COMMITTEE in loaded:
+                target = ROLE_USER
+            if target and target != row["role_name"]:
+                changes.setdefault(target, []).append(row["username"])
+        for role, usernames in changes.items():
+            db.execute(
+                text("UPDATE users SET role_id = :role_id WHERE username IN :usernames").bindparams(bindparam("usernames", expanding=True)),
+                {"role_id": _get_role_id(db, role), "usernames": usernames},
+            )
+        db.commit()
+        changed = sum(len(usernames) for usernames in changes.values())
+        if changed:
+            invalidate_account_state()
+            logger.info("Auto roles: %s", {role: len(usernames) for role, usernames in changes.items()})
+        return changed
+    finally:
+        db.close()
+
+
+def resolve_ecp_account(db, iin: str) -> tuple[str | None, str, str]:
+    """Вход по ЭЦП: ИИН из сертификата НУЦ → преподаватель (tutors.iin) или обучающийся (platonus_students.iin)
+    Platonus → учётная запись КРК. Преподаватель проверяется первым.
+
+    Возвращает (username, роль, источник или причина отказа). Существующая запись ищется по логину Platonus
+    с доменом и без (LDAP хранит user@domain); её пароль и LDAP-DN не меняются, роль — только из AUTO_ROLES.
+    Кто ещё не входил в КРК, получает учётную запись с автоматической ролью (член комитета, преподаватель, студент).
+    """
+    people, default_role = [], ROLE_USER
+    # ИИН заполняют синхронизация справочников (tutors) и расписания (platonus_students);
+    # колонки добавляют стартовые миграции
+    for table, role in (("tutors", ROLE_TEACHER), ("platonus_students", ROLE_STUDENT)):
+        try:
+            people = db.execute(text(f"SELECT full_name, login FROM {table} WHERE iin = :iin"), {"iin": iin}).mappings().all()
+        except Exception:
+            db.rollback()
+            continue
+        if people:
+            default_role = role
+            break
+    if not people:
+        return None, ROLE_USER, "iin_not_found"
+    logins = {_normalize_username(row["login"]) for row in people if (row["login"] or "").strip()}
+    if len(logins) != 1:
+        return None, ROLE_USER, "tutor_ambiguous" if logins else "tutor_login_missing"
+    login = logins.pop()
+
+    rows = db.execute(
+        text("""
+            SELECT u.username, r.name AS role_name
+            FROM users u
+            LEFT JOIN roles r ON r.id = u.role_id
+            WHERE u.username = :login OR SUBSTRING_INDEX(u.username, '@', 1) = :login
+            ORDER BY u.is_ldap DESC, u.last_login_at DESC
+        """),
+        {"login": login},
+    ).mappings().all()
+    if rows:
+        username, role = rows[0]["username"], rows[0]["role_name"] or ROLE_USER
+        if role in AUTO_ROLES:
+            role = _auto_role(db, [username, login], role)
+        db.execute(
+            text("UPDATE users SET last_login_at = NOW(), role_id = :role_id WHERE username = :username"),
+            {"username": username, "role_id": _get_role_id(db, role)},
+        )
+        db.commit()
+        invalidate_account_state(username)
+        return username, role, "ecp"
+
+    display_name = next((row["full_name"] for row in people if row["full_name"]), "") or login
+    role = _auto_role(db, [login], default_role)
+    _upsert_user(
+        db,
+        username=login,
+        display_name=display_name,
+        auth_source="ecp",
+        is_ldap=False,
+        ldap_dn=None,
+        password=None,
+        role_name=role,
+    )
+    return login, role, "ecp"
+
+
 def authenticate_user_details(username: str, password: str) -> tuple[bool, str, str, str]:
     normalized_username = _normalize_username(username)
 
@@ -909,7 +1128,6 @@ def authenticate_user_details(username: str, password: str) -> tuple[bool, str, 
     if is_env_admin_login and hmac.compare_digest((password or "").encode("utf-8"), ADMIN_PASSWORD.encode("utf-8")):
         db = SessionLocal()
         try:
-            _ensure_users_table(db)
             _upsert_user(
                 db,
                 username=normalized_username,
@@ -918,20 +1136,19 @@ def authenticate_user_details(username: str, password: str) -> tuple[bool, str, 
                 is_ldap=False,
                 ldap_dn=None,
                 password=password,
-                role_name=ROLE_ADMIN,
+                role_name=ROLE_SUPERADMIN,
             )
         finally:
             db.close()
-        return True, normalized_username, "local_admin", ROLE_ADMIN
+        return True, normalized_username, "local_admin", ROLE_SUPERADMIN
 
     # Env-админ входит только по актуальному ADMIN_PASSWORD: после ротации старый пароль
     # из локального кэша не должен подходить.
     if is_env_admin_login:
-        return False, normalized_username, "invalid_credentials", ROLE_STAFF
+        return False, normalized_username, "invalid_credentials", ROLE_USER
 
     db = SessionLocal()
     try:
-        _ensure_users_table(db)
         ldap_settings = _get_ldap_settings(db)
         ldap_enabled = bool((ldap_settings.get("server_url") or "").strip())
         if not ldap_enabled and ldap_settings.get("host"):
@@ -946,7 +1163,10 @@ def authenticate_user_details(username: str, password: str) -> tuple[bool, str, 
                 existing = next((r for r in existing_rows if r.get("username") == ldap_user["username"]), None)
                 if not existing:
                     existing = next(iter(existing_rows), None)
-                effective_role = (existing or {}).get("role_name") or ROLE_STAFF
+                effective_role = (existing or {}).get("role_name") or ROLE_USER
+                # Преподаватель и обучающийся Platonus получают свою роль; назначенные администратором не меняются
+                if effective_role in AUTO_ROLES:
+                    effective_role = _auto_role(db, alias_candidates, effective_role)
                 _upsert_user(
                     db,
                     username=ldap_user["username"],
@@ -971,9 +1191,9 @@ def authenticate_user_details(username: str, password: str) -> tuple[bool, str, 
                     is_ldap=False,
                     ldap_dn=None,
                     password=password,
-                    role_name=(cached.get("role_name") or ROLE_STAFF),
+                    role_name=(cached.get("role_name") or ROLE_USER),
                 )
-                return True, cached["username"], "local_cache", (cached.get("role_name") or ROLE_STAFF)
+                return True, cached["username"], "local_cache", (cached.get("role_name") or ROLE_USER)
 
             if ldap_error in {"connection", "unavailable"}:
                 if cached and _verify_password(password, cached.get("password_hash"), cached.get("password_salt")):
@@ -985,13 +1205,13 @@ def authenticate_user_details(username: str, password: str) -> tuple[bool, str, 
                         is_ldap=True,
                         ldap_dn=cached.get("ldap_dn"),
                         password=password,
-                        role_name=(cached.get("role_name") or ROLE_STAFF),
+                        role_name=(cached.get("role_name") or ROLE_USER),
                     )
-                    return True, cached["username"], "ldap_cache", (cached.get("role_name") or ROLE_STAFF)
+                    return True, cached["username"], "ldap_cache", (cached.get("role_name") or ROLE_USER)
 
-                return False, normalized_username, "ldap_unavailable", ROLE_STAFF
+                return False, normalized_username, "ldap_unavailable", ROLE_USER
 
-            return False, normalized_username, "invalid_credentials", ROLE_STAFF
+            return False, normalized_username, "invalid_credentials", ROLE_USER
 
         cached = _get_cached_user(db, username)
         if cached and _verify_password(password, cached.get("password_hash"), cached.get("password_salt")):
@@ -1003,18 +1223,13 @@ def authenticate_user_details(username: str, password: str) -> tuple[bool, str, 
                 is_ldap=bool(cached.get("is_ldap")),
                 ldap_dn=cached.get("ldap_dn"),
                 password=password,
-                role_name=(cached.get("role_name") or ROLE_STAFF),
+                role_name=(cached.get("role_name") or ROLE_USER),
             )
-            return True, cached["username"], "local_cache", (cached.get("role_name") or ROLE_STAFF)
+            return True, cached["username"], "local_cache", (cached.get("role_name") or ROLE_USER)
 
-        return False, normalized_username, "invalid_credentials", ROLE_STAFF
+        return False, normalized_username, "invalid_credentials", ROLE_USER
     finally:
         db.close()
-
-
-def authenticate_user(username: str, password: str) -> bool:
-    ok, _, _, _ = authenticate_user_details(username, password)
-    return ok
 
 
 def create_access_token(data: dict) -> str:
@@ -1066,6 +1281,7 @@ def get_current_user_context(token: str = Depends(_resolve_access_token)) -> dic
         "username": username,
         "role": account["role"],
         "auth_source": str(auth_source),
+        "faculty_id": account.get("faculty_id"),
     }
 
 
@@ -1099,7 +1315,7 @@ def _get_account_state(username: str) -> dict | None:
     try:
         row = db.execute(
             text("""
-                SELECT u.is_blocked, u.blocked_until, u.block_reason, r.name AS role_name
+                SELECT u.is_blocked, u.blocked_until, u.block_reason, u.faculty_id, r.name AS role_name
                 FROM users u
                 LEFT JOIN roles r ON r.id = u.role_id
                 WHERE u.username = :username
@@ -1114,7 +1330,7 @@ def _get_account_state(username: str) -> dict | None:
 
     state = None
     if row:
-        role = (row.get("role_name") or ROLE_STAFF).strip().lower()
+        role = (row.get("role_name") or ROLE_USER).strip().lower()
         blocked_until = row.get("blocked_until")
         # Автоблокировка за неверные пароли не обрывает уже открытые сессии,
         # иначе подбором пароля можно выбить пользователя из системы.
@@ -1123,7 +1339,12 @@ def _get_account_state(username: str) -> dict | None:
             and row.get("block_reason") != "too_many_failed_attempts"
             and (blocked_until is None or blocked_until > datetime.utcnow())
         )
-        state = {"role": role if role in ALL_ROLES else ROLE_STAFF, "blocked": blocked}
+        role = role if role in ALL_ROLES else ROLE_USER
+        faculty_id = row.get("faculty_id")
+        # Деканат без факультета ничего не видит — права базовой роли «Пользователь»
+        if role == ROLE_DEAN and not faculty_id:
+            role = ROLE_USER
+        state = {"role": role, "blocked": blocked, "faculty_id": faculty_id if role == ROLE_DEAN else None}
 
     # Отсутствие пользователя не кэшируется: иначе пересозданный или впервые вошедший
     # пользователь получал бы 401 до истечения TTL
@@ -1134,11 +1355,63 @@ def _get_account_state(username: str) -> dict | None:
     return state
 
 
+def ensure_auth_schema() -> None:
+    """Стартовая миграция таблиц users/roles (роли «Деканат» и «Пользователь», users.faculty_id)
+    и разовый перевод сотрудников в «Пользователи»."""
+    db = SessionLocal()
+    try:
+        _ensure_users_table(db)
+        _migrate_staff_to_user(db)
+        _promote_env_admin(db)
+    finally:
+        db.close()
+
+
+def _promote_env_admin(db) -> None:
+    """Встроенный аккаунт ADMIN_USERNAME — суперадминистратор (без ожидания его следующего входа)."""
+    if not ADMIN_USERNAME:
+        return
+    username = _normalize_username(ADMIN_USERNAME)
+    role_id = _get_role_id(db, ROLE_SUPERADMIN)
+    changed = db.execute(
+        text("UPDATE users SET role_id = :role_id WHERE username = :username AND COALESCE(role_id, 0) <> :role_id"),
+        {"role_id": role_id, "username": username},
+    ).rowcount
+    db.commit()
+    if changed:
+        invalidate_account_state(username)
+
+
+def _migrate_staff_to_user(db) -> None:
+    """Разово: все «Сотрудники» становятся «Пользователями» (администраторы, инспекторы и деканаты — без изменений).
+    Отметка в app_migrations не даёт повторить перевод и сбросить роли, назначенные позже."""
+    db.execute(text("""
+        CREATE TABLE IF NOT EXISTS app_migrations (
+            name VARCHAR(100) PRIMARY KEY,
+            applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+    """))
+    name = "2026_10_roles_staff_to_user"
+    if db.execute(text("SELECT 1 FROM app_migrations WHERE name = :n"), {"n": name}).first():
+        db.commit()
+        return
+    moved = db.execute(text("""
+        UPDATE users
+        SET role_id = (SELECT id FROM roles WHERE name = :user_role LIMIT 1)
+        WHERE role_id = (SELECT id FROM (SELECT id FROM roles WHERE name = :staff_role LIMIT 1) AS r)
+    """), {"user_role": ROLE_USER, "staff_role": ROLE_STAFF}).rowcount
+    db.execute(text("INSERT INTO app_migrations (name) VALUES (:n)"), {"n": name})
+    db.commit()
+    invalidate_account_state()
+    logger.info("Roles migration %s: %s staff users moved to %s", name, moved, ROLE_USER)
+
+
 def require_roles(*allowed_roles: str):
     allowed = {r.strip().lower() for r in allowed_roles if r and r.strip()}
 
     def _checker(context: dict[str, str] = Depends(get_current_user_context)) -> dict[str, str]:
-        if context.get("role") not in allowed:
+        # Суперадминистратор проходит любую проверку ролей
+        if context.get("role") != ROLE_SUPERADMIN and context.get("role") not in allowed:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
         return context
 

@@ -9,3 +9,9 @@ python-multipart==0.0.32
 python-dotenv==1.2.2
 cryptography==49.0.0
 ldap3==2.9.1
+fpdf2==2.8.3
+# PDF приказов комитета КРК (services/committee_pdf.py)
+reportlab==4.2.5
+segno==1.6.1
+# Изображения в акте наблюдения (services/situational_monitoring.py импортирует PIL напрямую)
+pillow==13.0.0

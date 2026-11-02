@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models.rating_template import RatingTemplate
 from models.record import Record
-from services import ROLE_ADMIN, get_current_user_context, require_roles
+from services import ROLE_ADMIN, ROLE_INSPECTOR, get_current_user_context, require_roles
 from services import rating_template_service as templates
 from services.audit_log import audit_event
 from services.request_meta import get_client_ip
@@ -209,22 +209,12 @@ def list_templates(
     return [_to_out(item, counts.get(item.academic_year, 0)) for item in items]
 
 
-@router.get("/{academic_year}", response_model=TemplateOut)
-def get_template(
-    academic_year: str,
-    db: Session = Depends(get_db),
-    _: dict[str, str] = Depends(get_current_user_context),
-):
-    template = _get_or_404(db, academic_year)
-    return _to_out(template, _records_counts(db).get(academic_year, 0))
-
-
 @router.post("", response_model=TemplateOut, status_code=201)
 def create_template(
     body: TemplateCreate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
 ):
     if templates.get_template(db, body.academic_year):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Справочник для этого учебного года уже есть")
@@ -264,7 +254,7 @@ def update_template(
     body: TemplateIn,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
 ):
     template = _get_or_404(db, academic_year)
     records_count = _records_counts(db).get(academic_year, 0)
@@ -302,7 +292,7 @@ def delete_template(
     academic_year: str,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
 ):
     template = _get_or_404(db, academic_year)
     records_count = _records_counts(db).get(academic_year, 0)

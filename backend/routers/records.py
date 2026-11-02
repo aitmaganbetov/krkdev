@@ -8,13 +8,16 @@ from database import get_db
 from schemas.record import RecordCreate, RecordUpdate, RecordOut, RecordListOut, DashboardStats
 from services import (
     ROLE_ADMIN,
+    ROLE_DEAN,
     ROLE_INSPECTOR,
+    ROLE_COMMITTEE,
     ROLE_STAFF,
-    get_current_user_context,
+    RECORD_AUTHOR_ROLES,
     record_service,
     require_roles,
 )
 from services.audit_log import audit_event
+from services.faculty_scope import dean_faculty_name, forbid_other_faculty
 from services.request_meta import get_client_ip
 
 router = APIRouter(prefix="/records", tags=["records"])
@@ -37,13 +40,25 @@ def _is_owner(submitted_by: Optional[str], username: str) -> bool:
     return bool(owner and owner in _username_aliases(username))
 
 
+def _ensure_record_faculty(db: Session, current_user: dict, faculty: Optional[str]) -> None:
+    """Деканат работает только с записями своего факультета (records.faculty)."""
+    own = dean_faculty_name(db, current_user)
+    if own is not None and (faculty or "").strip() != own:
+        raise forbid_other_faculty("Доступ только к записям своего факультета")
+
+
 @router.get("/filter-options")
 def get_record_filter_options(
     db: Session = Depends(get_db),
-    _: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
+    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR, ROLE_DEAN)),
     academic_year: Optional[str] = Query(None),
 ):
-    return record_service.get_record_filter_options(db, academic_year=academic_year)
+    options = record_service.get_record_filter_options(db, academic_year=academic_year)
+    own = dean_faculty_name(db, current_user)
+    if own is not None:
+        faculties = [item for item in options["faculties"] if item["name"] == own]
+        options = {**options, "faculties": faculties, "ops": sorted({op for item in faculties for op in item["ops"]}, key=str.lower)}
+    return options
 
 
 @router.get("/dashboard/faculty-comparison")
@@ -52,8 +67,9 @@ def get_faculty_comparison(
     op: Optional[str] = Query(None),
     academic_year: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    _: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
+    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR, ROLE_DEAN)),
 ):
+    faculty = dean_faculty_name(db, current_user) or faculty
     return record_service.get_faculty_comparison(db, faculty=faculty, op=op, academic_year=academic_year)
 
 
@@ -63,8 +79,9 @@ def dashboard(
     op: Optional[str] = Query(None),
     academic_year: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    _: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
+    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR, ROLE_DEAN)),
 ):
+    faculty = dean_faculty_name(db, current_user) or faculty
     return record_service.get_dashboard_stats(db, faculty=faculty, op=op, academic_year=academic_year)
 
 
@@ -81,12 +98,14 @@ def list_records(
     academic_year: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user: dict[str, str] = Depends(get_current_user_context),
+    # Явный список ролей: иные роли записей КРК не видят; деканат — только своего факультета
+    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR, ROLE_STAFF, ROLE_COMMITTEE, ROLE_DEAN)),
 ):
+    faculty = dean_faculty_name(db, current_user) or faculty
     submitted_by = None
     submitted_by_aliases = None
     inspector_review_view = current_user["role"] == ROLE_INSPECTOR
-    if current_user["role"] == ROLE_STAFF:
+    if current_user["role"] in RECORD_AUTHOR_ROLES:
         submitted_by_aliases = _username_aliases(current_user["username"])
         submitted_by = current_user["username"]
 
@@ -106,8 +125,9 @@ def create_record(
     body: RecordCreate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR, ROLE_STAFF)),
+    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR, ROLE_STAFF, ROLE_COMMITTEE, ROLE_DEAN)),
 ):
+    _ensure_record_faculty(db, current_user, body.faculty)
     try:
         record = record_service.create_record(db, body, submitted_by=current_user["username"])
         audit_event(
@@ -141,10 +161,11 @@ def create_record(
 def get_record(
     record_id: int,
     db: Session = Depends(get_db),
-    current_user: dict[str, str] = Depends(get_current_user_context),
+    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR, ROLE_STAFF, ROLE_COMMITTEE, ROLE_DEAN)),
 ):
     record = record_service.get_record_by_id(db, record_id)
-    if current_user["role"] == ROLE_STAFF and not _is_owner(record.submitted_by, current_user["username"]):
+    _ensure_record_faculty(db, current_user, record.faculty)
+    if current_user["role"] in RECORD_AUTHOR_ROLES and not _is_owner(record.submitted_by, current_user["username"]):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ только к своим записям")
     if (
         current_user["role"] == ROLE_INSPECTOR
@@ -161,8 +182,12 @@ def update_record(
     body: RecordUpdate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR, ROLE_STAFF)),
+    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR, ROLE_STAFF, ROLE_COMMITTEE, ROLE_DEAN)),
 ):
+    if dean_faculty_name(db, current_user) is not None:
+        _ensure_record_faculty(db, current_user, record_service.get_record_by_id(db, record_id).faculty)
+        if body.faculty is not None:
+            _ensure_record_faculty(db, current_user, body.faculty)
     try:
         result = record_service.update_record(
             db, record_id, body, 
@@ -201,8 +226,9 @@ def delete_record(
     record_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
+    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR, ROLE_DEAN)),
 ):
+    _ensure_record_faculty(db, current_user, record_service.get_record_by_id(db, record_id).faculty)
     try:
         record_service.delete_record(db, record_id)
         audit_event(
@@ -230,7 +256,7 @@ def submit_record(
     record_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: dict[str, str] = Depends(require_roles(ROLE_STAFF)),
+    current_user: dict[str, str] = Depends(require_roles(*RECORD_AUTHOR_ROLES)),
 ):
     """Staff submits their record"""
     try:
@@ -286,11 +312,12 @@ def send_to_rework(
     record_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
+    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR, ROLE_DEAN)),
 ):
     """Admin/Inspector sends record back to rework"""
     try:
         record = record_service.get_record_by_id(db, record_id, for_update=True)
+        _ensure_record_faculty(db, current_user, record.faculty)
         
         # Can only send submitted records to rework
         if record.status != "submitted":
@@ -335,11 +362,12 @@ def accept_record(
     record_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
+    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR, ROLE_DEAN)),
 ):
     """Admin/Inspector accepts record"""
     try:
         record = record_service.get_record_by_id(db, record_id, for_update=True)
+        _ensure_record_faculty(db, current_user, record.faculty)
         
         # Can only accept submitted or rework records
         if record.status not in ["submitted", "rework"]:

@@ -6,7 +6,7 @@ from sqlalchemy.sql import func
 class Record(Base):
     __tablename__ = "records"
 
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     teacher = Column(String(255), nullable=False, index=True)
     subject = Column(String(255), nullable=False, index=True)
     faculty = Column(String(255), nullable=False)

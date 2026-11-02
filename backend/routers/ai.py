@@ -14,7 +14,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from database import get_db
-from services import ROLE_ADMIN, ROLE_INSPECTOR, require_roles
+from services import ROLE_ADMIN, ROLE_DEAN, ROLE_SUPERADMIN, require_roles
 from services.audit_log import audit_event
 from services.secret_box import decrypt_secret, encrypt_secret
 
@@ -74,24 +74,12 @@ class ImproveTextOut(BaseModel):
     model: str
 
 
-def _ensure_settings_table(db: Session) -> None:
-    db.execute(text("""
-        CREATE TABLE IF NOT EXISTS system_settings (
-            `key` VARCHAR(128) PRIMARY KEY,
-            value_text LONGTEXT NOT NULL,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
-    """))
-    db.commit()
-
-
 # Шифрование секретов в БД — общий модуль (камеры, AI, LDAP)
 _encrypt_secret = encrypt_secret
 _decrypt_secret = decrypt_secret
 
 
 def _load_settings(db: Session) -> dict:
-    _ensure_settings_table(db)
     row = db.execute(
         text("SELECT value_text FROM system_settings WHERE `key` = 'ai' LIMIT 1")
     ).mappings().first()
@@ -209,7 +197,7 @@ def _call_provider(provider: str, settings: dict, prompt: str) -> tuple[str, str
 @router.get("/settings", response_model=AiSettingsOut)
 def get_ai_settings(
     db: Session = Depends(get_db),
-    _: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+    _: dict[str, str] = Depends(require_roles(ROLE_SUPERADMIN)),
 ):
     try:
         return _serialize(_load_settings(db))
@@ -221,7 +209,7 @@ def get_ai_settings(
 def save_ai_settings(
     body: AiSettingsIn,
     db: Session = Depends(get_db),
-    context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+    context: dict[str, str] = Depends(require_roles(ROLE_SUPERADMIN)),
 ):
     if body.active_provider not in {"openai", "gemini"}:
         raise HTTPException(status_code=422, detail="Неизвестный AI-провайдер")
@@ -267,7 +255,7 @@ def save_ai_settings(
 def test_ai_provider(
     provider: str,
     db: Session = Depends(get_db),
-    context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+    context: dict[str, str] = Depends(require_roles(ROLE_SUPERADMIN)),
 ):
     if provider not in {"openai", "gemini"}:
         raise HTTPException(status_code=404, detail="AI-провайдер не найден")
@@ -305,7 +293,7 @@ def _check_improve_quota(username: str) -> None:
 def improve_violation_text(
     body: ImproveTextIn,
     db: Session = Depends(get_db),
-    context: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
+    context: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_DEAN)),
 ):
     username = context.get("username") or "unknown"
     _check_improve_quota(username)

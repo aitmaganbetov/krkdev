@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from database import get_db
 from models import AuditLog
-from services import require_roles, ROLE_ADMIN
+from services import require_roles, ROLE_SUPERADMIN
 from datetime import datetime, timedelta, timezone
 import logging
 
@@ -18,7 +19,7 @@ def list_audit_logs(
     outcome: str | None = None,
     actor: str | None = None,
     days_back: int = Query(7, ge=1, le=90),
-    _: dict = Depends(require_roles(ROLE_ADMIN)),
+    _: dict = Depends(require_roles(ROLE_SUPERADMIN)),
     db: Session = Depends(get_db),
 ):
     """List audit logs with optional filtering"""
@@ -57,26 +58,27 @@ def list_audit_logs(
 @router.get("/stats")
 def audit_logs_stats(
     days_back: int = Query(7, ge=1, le=90),
-    _: dict = Depends(require_roles(ROLE_ADMIN)),
+    _: dict = Depends(require_roles(ROLE_SUPERADMIN)),
     db: Session = Depends(get_db),
 ):
     """Get statistics about audit logs"""
     try:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
         
-        query = db.query(AuditLog).filter(AuditLog.timestamp >= cutoff)
-        
-        total_events = query.count()
-        success_count = query.filter(AuditLog.outcome == "success").count()
-        failure_count = query.filter(AuditLog.outcome == "failure").count()
-        blocked_count = query.filter(AuditLog.outcome == "blocked").count()
-        
-        # Get unique actors
-        actors = db.query(AuditLog.actor).filter(AuditLog.timestamp >= cutoff).distinct().all()
-        unique_actors = len(actors)
-        
+        # Счётчики по итогам — одним запросом с группировкой
+        by_outcome = dict(
+            db.query(AuditLog.outcome, func.count(AuditLog.id))
+            .filter(AuditLog.timestamp >= cutoff).group_by(AuditLog.outcome).all()
+        )
+        total_events = sum(by_outcome.values())
+
+        # Уникальные авторы; записи без автора (NULL) считаются одним, как прежде в DISTINCT
+        distinct_actors, has_anonymous = db.query(
+            func.count(func.distinct(AuditLog.actor)), func.max(AuditLog.actor.is_(None))
+        ).filter(AuditLog.timestamp >= cutoff).one()
+        unique_actors = int(distinct_actors or 0) + (1 if has_anonymous else 0)
+
         # Get most common actions
-        from sqlalchemy import func
         top_actions = db.query(
             AuditLog.action,
             func.count(AuditLog.id).label("count")
@@ -85,9 +87,9 @@ def audit_logs_stats(
         return {
             "days": days_back,
             "total_events": total_events,
-            "success": success_count,
-            "failure": failure_count,
-            "blocked": blocked_count,
+            "success": by_outcome.get("success", 0),
+            "failure": by_outcome.get("failure", 0),
+            "blocked": by_outcome.get("blocked", 0),
             "unique_actors": unique_actors,
             "top_actions": [{"action": action, "count": count} for action, count in top_actions],
         }
@@ -98,12 +100,11 @@ def audit_logs_stats(
 
 @router.get("/actions")
 def get_audit_log_actions(
-    _: dict = Depends(require_roles(ROLE_ADMIN)),
+    _: dict = Depends(require_roles(ROLE_SUPERADMIN)),
     db: Session = Depends(get_db),
 ):
     """Get list of all unique actions in audit logs"""
     try:
-        from sqlalchemy import func
         actions = db.query(AuditLog.action).distinct().order_by(AuditLog.action).all()
         return {"actions": [action[0] for action in actions]}
     except Exception as e:
@@ -113,12 +114,11 @@ def get_audit_log_actions(
 
 @router.get("/actors")
 def get_audit_log_actors(
-    _: dict = Depends(require_roles(ROLE_ADMIN)),
+    _: dict = Depends(require_roles(ROLE_SUPERADMIN)),
     db: Session = Depends(get_db),
 ):
     """Get list of all unique actors in audit logs"""
     try:
-        from sqlalchemy import func
         actors = db.query(AuditLog.actor).distinct().order_by(AuditLog.actor).all()
         return {"actors": [actor[0] for actor in actors if actor[0]]}
     except Exception as e:

@@ -4,6 +4,7 @@ from sqlalchemy import case, func
 from models.record import Record
 from schemas.record import RecordCreate, RecordUpdate, DashboardStats
 from services import rating_template_service as rating_templates
+from services.auth_service import RECORD_AUTHOR_ROLES
 from fastapi import HTTPException, status
 from typing import Optional
 
@@ -198,8 +199,8 @@ def update_record(
             detail="Cannot edit accepted records"
         )
     
-    # Access control: Staff can only edit their own draft/rework records
-    if user_role and user_role.lower() == "staff":
+    # Access control: Staff and committee members can only edit their own draft/rework records
+    if user_role and user_role.lower() in RECORD_AUTHOR_ROLES:
         if not _is_owner(record.submitted_by, updated_by):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -292,21 +293,6 @@ def get_dashboard_stats(
     avg_score = base.with_entities(func.avg(Record.score)).scalar() or 0.0
     avg_attendance = base.with_entities(func.avg(Record.attendance)).scalar() or 0.0
     problem_records = base.filter(Record.is_problem.is_(True)).with_entities(func.count(Record.id)).scalar() or 0
-
-    return DashboardStats(
-        total_records=total,
-        avg_score=round(float(avg_score), 2),
-        avg_attendance=round(float(avg_attendance), 1),
-        problem_records=problem_records,
-    )
-
-
-def get_dashboard_stats_for_user(db: Session, submitted_by: str) -> DashboardStats:
-    scoped = db.query(Record).filter(Record.submitted_by == submitted_by, Record.status == "accepted")
-    total = scoped.with_entities(func.count(Record.id)).scalar() or 0
-    avg_score = scoped.with_entities(func.avg(Record.score)).scalar() or 0.0
-    avg_attendance = scoped.with_entities(func.avg(Record.attendance)).scalar() or 0.0
-    problem_records = scoped.filter(Record.is_problem.is_(True)).with_entities(func.count(Record.id)).scalar() or 0
 
     return DashboardStats(
         total_records=total,

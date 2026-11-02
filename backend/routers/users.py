@@ -1,24 +1,25 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
-import base64
-import hashlib
 import json
+import logging
 import os
 import re
 import site
 import ssl
 import sys
-from urllib.parse import urlparse
+from time import monotonic
 
 from database import get_db
-from services import ROLE_ADMIN, get_current_user, require_roles
+from services import ROLE_ADMIN, ROLE_SUPERADMIN, get_current_user, require_roles
 from services.audit_log import audit_event
-from services.auth_service import invalidate_account_state
+from services.auth_service import _hash_password, _normalize_username, _parse_ldap_server_url, invalidate_account_state
 from services.secret_box import decode_ldap_settings
 from services.request_meta import get_client_ip
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -27,6 +28,8 @@ class CachedUserOut(BaseModel):
     username: str
     display_name: str
     role: str
+    faculty_id: int | None = None
+    faculty_name: str | None = None
     auth_source: str
     is_ldap: bool
     ldap_dn: str | None = None
@@ -44,19 +47,22 @@ class LdapDirectoryUserOut(BaseModel):
 
 class UserRoleUpdateIn(BaseModel):
     role: str
+    faculty_id: int | None = None
 
 
 class LocalUserCreateIn(BaseModel):
     username: str
     display_name: str = ""
     password: str
-    role: str = "staff"
+    role: str = "user"
+    faculty_id: int | None = None
 
 
 class LocalUserUpdateIn(BaseModel):
     display_name: str | None = None
     password: str | None = None
     role: str | None = None
+    faculty_id: int | None = None
 
 
 class UserBlockIn(BaseModel):
@@ -86,48 +92,61 @@ def _import_ldap3_for_users():
             ) from first_exc
 
 
-def _parse_ldap_server_url(server_url: str) -> tuple[str, int, bool]:
-    raw = (server_url or "").strip()
-    if not raw:
-        raise ValueError("missing_server_url")
-
-    if "://" not in raw:
-        raw = f"ldaps://{raw}"
-
-    parsed = urlparse(raw)
-    scheme = (parsed.scheme or "").lower()
-    if scheme not in {"ldap", "ldaps"}:
-        raise ValueError("invalid_scheme")
-
-    host = (parsed.hostname or "").strip()
-    if not host:
-        raise ValueError("missing_host")
-
-    use_ssl = scheme == "ldaps"
-    port = parsed.port or (636 if use_ssl else 389)
-    return host, port, use_ssl
-
-
-def _normalize_username(username: str) -> str:
-    return (username or "").strip().lower()
-
-
-def _hash_password(password: str, salt: str | None = None) -> tuple[str, str]:
-    effective_salt = salt or base64.b64encode(os.urandom(16)).decode("ascii")
-    digest = hashlib.pbkdf2_hmac(
-        "sha256",
-        password.encode("utf-8"),
-        effective_salt.encode("utf-8"),
-        200_000,
-    )
-    return digest.hex(), effective_salt
-
-
-def _validate_role(role: str | None) -> str:
-    normalized = (role or "staff").strip().lower()
-    if normalized not in {"admin", "inspector", "staff"}:
-        raise HTTPException(status_code=400, detail="Роль должна быть admin, inspector или staff")
+def _validate_role(role: str | None, actor_role: str | None) -> str:
+    normalized = (role or "user").strip().lower()
+    if normalized == "committee":
+        raise HTTPException(status_code=400, detail="Роль «Член комитета КРК» назначается по составу комитета в разделе «Комитет КРК»")
+    if normalized not in {ROLE_SUPERADMIN, "admin", "inspector", "peer_inspector", "staff", "dean", "user", "teacher", "student"}:
+        raise HTTPException(status_code=400, detail="Роль должна быть superadmin, admin, inspector, peer_inspector, staff, dean, user, teacher или student")
+    # Иначе администратор мог бы выдать себе или другому все права
+    if normalized == ROLE_SUPERADMIN and actor_role != ROLE_SUPERADMIN:
+        raise HTTPException(status_code=403, detail="Роль суперадминистратора назначает только суперадминистратор")
     return normalized
+
+
+def _current_role(db: Session, username: str) -> str | None:
+    return db.execute(
+        text("""
+            SELECT COALESCE(r.name, 'user') AS role
+            FROM users u
+            LEFT JOIN roles r ON r.id = u.role_id
+            WHERE u.username = :username
+            LIMIT 1
+        """),
+        {"username": username},
+    ).scalar()
+
+
+def _count_role(db: Session, *roles: str) -> int:
+    return int(db.execute(
+        text("""
+            SELECT COUNT(*)
+            FROM users u
+            LEFT JOIN roles r ON r.id = u.role_id
+            WHERE COALESCE(r.name, 'user') IN :roles
+        """).bindparams(bindparam("roles", expanding=True)),
+        {"roles": list(roles)},
+    ).scalar() or 0)
+
+
+def _guard_superadmin_target(db: Session, username: str, actor_role: str | None) -> None:
+    """Учётную запись суперадминистратора меняет, блокирует и удаляет только суперадминистратор."""
+    if actor_role != ROLE_SUPERADMIN and _current_role(db, username) == ROLE_SUPERADMIN:
+        raise HTTPException(status_code=403, detail="Изменять суперадминистратора может только суперадминистратор")
+
+
+def _set_user_faculty(db: Session, username: str, role: str, faculty_id: int | None) -> None:
+    """Факультет нужен только деканату; у остальных ролей он сбрасывается."""
+    if role != "dean":
+        db.execute(text("UPDATE users SET faculty_id = NULL WHERE username = :username"), {"username": username})
+        return
+    if not faculty_id:
+        raise HTTPException(status_code=400, detail="Для роли «Деканат» выберите факультет")
+    exists = db.execute(text("SELECT 1 FROM faculties WHERE FacultyID = :id LIMIT 1"), {"id": faculty_id}).first()
+    if not exists:
+        raise HTTPException(status_code=400, detail="Факультет не найден в справочнике")
+    db.execute(text("UPDATE users SET faculty_id = :faculty_id WHERE username = :username"),
+               {"faculty_id": faculty_id, "username": username})
 
 
 def _fetch_local_user_row(db: Session, username: str):
@@ -135,7 +154,9 @@ def _fetch_local_user_row(db: Session, username: str):
         SELECT
             u.username,
             COALESCE(u.display_name, u.username) AS display_name,
-            COALESCE(r.name, 'staff') AS role,
+            COALESCE(r.name, 'user') AS role,
+            u.faculty_id,
+            f.facultyNameRU AS faculty_name,
             u.auth_source,
             u.is_ldap,
             u.ldap_dn,
@@ -145,16 +166,40 @@ def _fetch_local_user_row(db: Session, username: str):
             u.block_reason
         FROM users u
         LEFT JOIN roles r ON r.id = u.role_id
+        LEFT JOIN faculties f ON f.FacultyID = u.faculty_id
         WHERE u.username = :username
         LIMIT 1
     """), {"username": _normalize_username(username)}).mappings().first()
+
+
+LOCAL_USERS_SQL = """
+    SELECT
+        u.username,
+        COALESCE(u.display_name, u.username) AS display_name,
+        COALESCE(r.name, 'user') AS role,
+        u.faculty_id,
+        f.facultyNameRU AS faculty_name,
+        u.auth_source,
+        u.is_ldap,
+        u.ldap_dn,
+        DATE_FORMAT(u.last_login_at, '%Y-%m-%d %H:%i:%s') AS last_login_at,
+        u.is_blocked,
+        DATE_FORMAT(u.blocked_until, '%Y-%m-%d %H:%i:%s') AS blocked_until,
+        u.block_reason
+    FROM users u
+    LEFT JOIN roles r ON r.id = u.role_id
+    LEFT JOIN faculties f ON f.FacultyID = u.faculty_id
+    ORDER BY last_login_at DESC
+"""
 
 
 def _map_cached_user_row(row) -> dict:
     return {
         "username": row["username"],
         "display_name": row["display_name"],
-        "role": row["role"] or "staff",
+        "role": row["role"] or "user",
+        "faculty_id": row.get("faculty_id"),
+        "faculty_name": row.get("faculty_name"),
         "auth_source": row["auth_source"],
         "is_ldap": bool(row["is_ldap"]),
         "ldap_dn": row["ldap_dn"],
@@ -163,108 +208,6 @@ def _map_cached_user_row(row) -> dict:
         "blocked_until": row.get("blocked_until"),
         "block_reason": row.get("block_reason"),
     }
-
-
-def _ensure_users_table(db: Session) -> None:
-    db.execute(text("""
-        CREATE TABLE IF NOT EXISTS roles (
-            id INT PRIMARY KEY AUTO_INCREMENT,
-            name VARCHAR(50) NOT NULL UNIQUE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
-    """))
-    db.execute(text("INSERT IGNORE INTO roles (name) VALUES ('admin')"))
-    db.execute(text("INSERT IGNORE INTO roles (name) VALUES ('inspector')"))
-    db.execute(text("INSERT IGNORE INTO roles (name) VALUES ('staff')"))
-
-    db.execute(text("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INT PRIMARY KEY AUTO_INCREMENT,
-            username VARCHAR(255) NOT NULL UNIQUE,
-            display_name VARCHAR(255) NULL,
-            role_id INT NULL,
-            auth_source VARCHAR(50) NOT NULL DEFAULT 'local',
-            is_ldap TINYINT(1) NOT NULL DEFAULT 0,
-            ldap_dn VARCHAR(512) NULL,
-            password_hash VARCHAR(255) NULL,
-            password_salt VARCHAR(255) NULL,
-            is_blocked TINYINT(1) NOT NULL DEFAULT 0,
-            blocked_until DATETIME NULL,
-            block_reason VARCHAR(255) NULL,
-            last_login_at DATETIME NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            KEY idx_users_last_login_at (last_login_at),
-            KEY idx_users_role_id (role_id),
-            KEY idx_users_blocked_until (blocked_until),
-            CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES roles(id)
-        ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
-    """))
-
-    role_column = db.execute(text("""
-        SELECT 1
-        FROM information_schema.COLUMNS
-        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'role_id'
-        LIMIT 1
-    """)).first()
-    if not role_column:
-        db.execute(text("ALTER TABLE users ADD COLUMN role_id INT NULL"))
-        db.execute(text("ALTER TABLE users ADD KEY idx_users_role_id (role_id)"))
-
-    blocked_column = db.execute(text("""
-        SELECT 1
-        FROM information_schema.COLUMNS
-        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'is_blocked'
-        LIMIT 1
-    """)).first()
-    if not blocked_column:
-        db.execute(text("ALTER TABLE users ADD COLUMN is_blocked TINYINT(1) NOT NULL DEFAULT 0"))
-
-    blocked_until_column = db.execute(text("""
-        SELECT 1
-        FROM information_schema.COLUMNS
-        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'blocked_until'
-        LIMIT 1
-    """)).first()
-    if not blocked_until_column:
-        db.execute(text("ALTER TABLE users ADD COLUMN blocked_until DATETIME NULL"))
-
-    block_reason_column = db.execute(text("""
-        SELECT 1
-        FROM information_schema.COLUMNS
-        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'block_reason'
-        LIMIT 1
-    """)).first()
-    if not block_reason_column:
-        db.execute(text("ALTER TABLE users ADD COLUMN block_reason VARCHAR(255) NULL"))
-
-    blocked_index = db.execute(text("""
-        SELECT 1
-        FROM information_schema.STATISTICS
-        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND INDEX_NAME = 'idx_users_blocked_until'
-        LIMIT 1
-    """)).first()
-    if not blocked_index:
-        db.execute(text("ALTER TABLE users ADD KEY idx_users_blocked_until (blocked_until)"))
-
-    fk_exists = db.execute(text("""
-        SELECT 1
-        FROM information_schema.TABLE_CONSTRAINTS
-        WHERE TABLE_SCHEMA = DATABASE()
-          AND TABLE_NAME = 'users'
-          AND CONSTRAINT_NAME = 'fk_users_role'
-          AND CONSTRAINT_TYPE = 'FOREIGN KEY'
-        LIMIT 1
-    """)).first()
-    if not fk_exists:
-        db.execute(text("ALTER TABLE users ADD CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES roles(id)"))
-
-    db.execute(text("""
-        UPDATE users
-        SET role_id = (SELECT id FROM roles WHERE name = 'staff' LIMIT 1)
-        WHERE role_id IS NULL
-    """))
-    db.commit()
 
 
 def _load_ldap_settings(db: Session) -> dict:
@@ -380,12 +323,30 @@ def _load_ldap_directory_profiles(db: Session) -> dict[str, dict]:
     return profiles
 
 
+# Учётные записи LDAP, у которых вместо ФИО логин, сверяются с каталогом не чаще раза в час на логин:
+# без этого каждое открытие списка пользователей выполняло полный поиск по каталогу LDAP
+_LDAP_NAME_RETRY_SECONDS = 3600
+_ldap_name_attempts: dict[str, float] = {}
+
+
 def _sync_local_ldap_display_names(db: Session, rows: list[dict]) -> bool:
-    candidates = [row for row in rows if bool(row["is_ldap"]) and _looks_like_login(row["display_name"], row["username"])]
+    now = monotonic()
+    candidates = [
+        row for row in rows
+        if bool(row["is_ldap"]) and _looks_like_login(row["display_name"], row["username"])
+        and now - _ldap_name_attempts.get(row["username"], -_LDAP_NAME_RETRY_SECONDS) >= _LDAP_NAME_RETRY_SECONDS
+    ]
     if not candidates:
         return False
+    for row in candidates:
+        _ldap_name_attempts[row["username"]] = now
 
-    profiles = _load_ldap_directory_profiles(db)
+    try:
+        profiles = _load_ldap_directory_profiles(db)
+    except Exception:
+        # Каталог недоступен — список пользователей показывается с текущими именами
+        logger.warning("Не удалось получить ФИО из LDAP для списка пользователей", exc_info=True)
+        return False
     if not profiles:
         return False
 
@@ -444,42 +405,11 @@ def list_local_users(
     __: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
 ):
     try:
-        _ensure_users_table(db)
 
-        rows = db.execute(text("""
-            SELECT
-                u.username,
-                COALESCE(u.display_name, u.username) AS display_name,
-                COALESCE(r.name, 'staff') AS role,
-                u.auth_source,
-                u.is_ldap,
-                u.ldap_dn,
-                DATE_FORMAT(u.last_login_at, '%Y-%m-%d %H:%i:%s') AS last_login_at,
-                u.is_blocked,
-                DATE_FORMAT(u.blocked_until, '%Y-%m-%d %H:%i:%s') AS blocked_until,
-                u.block_reason
-            FROM users u
-            LEFT JOIN roles r ON r.id = u.role_id
-            ORDER BY last_login_at DESC
-        """)).mappings().all()
+        rows = db.execute(text(LOCAL_USERS_SQL)).mappings().all()
 
         if _sync_local_ldap_display_names(db, list(rows)):
-            rows = db.execute(text("""
-                SELECT
-                    u.username,
-                    COALESCE(u.display_name, u.username) AS display_name,
-                    COALESCE(r.name, 'staff') AS role,
-                    u.auth_source,
-                    u.is_ldap,
-                    u.ldap_dn,
-                    DATE_FORMAT(u.last_login_at, '%Y-%m-%d %H:%i:%s') AS last_login_at,
-                    u.is_blocked,
-                    DATE_FORMAT(u.blocked_until, '%Y-%m-%d %H:%i:%s') AS blocked_until,
-                    u.block_reason
-                FROM users u
-                LEFT JOIN roles r ON r.id = u.role_id
-                ORDER BY last_login_at DESC
-            """)).mappings().all()
+            rows = db.execute(text(LOCAL_USERS_SQL)).mappings().all()
 
         return [
             _map_cached_user_row(row)
@@ -493,7 +423,7 @@ def list_local_users(
 def list_ldap_directory_users(
     db: Session = Depends(get_db),
     _: str = Depends(get_current_user),
-    __: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+    __: dict[str, str] = Depends(require_roles(ROLE_SUPERADMIN)),
 ):
     try:
         settings = _load_ldap_settings(db)
@@ -610,32 +540,15 @@ def list_ldap_directory_users(
 
 
 def _guard_admin_demotion(db: Session, target_username: str, new_role: str, actor: str | None) -> None:
-    """Не даёт снять роль admin с себя и с последнего администратора."""
-    if new_role == ROLE_ADMIN:
-        return
-    current = db.execute(
-        text("""
-            SELECT COALESCE(r.name, 'staff') AS role
-            FROM users u
-            LEFT JOIN roles r ON r.id = u.role_id
-            WHERE u.username = :username
-            LIMIT 1
-        """),
-        {"username": target_username},
-    ).scalar()
-    if current != ROLE_ADMIN:
+    """Не даёт понизить себя, последнего суперадминистратора и последнего администратора."""
+    current = _current_role(db, target_username)
+    if current not in (ROLE_SUPERADMIN, ROLE_ADMIN) or new_role == current:
         return
     if target_username == _normalize_username(actor or ""):
-        raise HTTPException(status_code=400, detail="Нельзя снять роль администратора с самого себя")
-    admins_count = db.execute(
-        text("""
-            SELECT COUNT(*)
-            FROM users u
-            LEFT JOIN roles r ON r.id = u.role_id
-            WHERE COALESCE(r.name, 'staff') = 'admin'
-        """),
-    ).scalar() or 0
-    if int(admins_count) <= 1:
+        raise HTTPException(status_code=400, detail="Нельзя изменить роль самому себе")
+    if current == ROLE_SUPERADMIN and _count_role(db, ROLE_SUPERADMIN) <= 1:
+        raise HTTPException(status_code=400, detail="Нельзя понизить последнего суперадминистратора")
+    if new_role != ROLE_SUPERADMIN and _count_role(db, ROLE_SUPERADMIN, ROLE_ADMIN) <= 1:
         raise HTTPException(status_code=400, detail="Нельзя понизить последнего администратора")
 
 
@@ -648,10 +561,9 @@ def update_local_user_role(
     context: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
 ):
     client_ip = get_client_ip(request)
-    role = _validate_role(body.role)
+    role = _validate_role(body.role, context.get("role"))
 
     try:
-        _ensure_users_table(db)
 
         target = db.execute(
             text("""
@@ -661,6 +573,7 @@ def update_local_user_role(
         ).mappings().first()
         if not target:
             raise HTTPException(status_code=404, detail="Пользователь не найден")
+        _guard_superadmin_target(db, username.strip().lower(), context.get("role"))
         _guard_admin_demotion(db, username.strip().lower(), role, context.get("username"))
 
         db.execute(
@@ -671,6 +584,7 @@ def update_local_user_role(
             """),
             {"role": role, "username": username.strip().lower()},
         )
+        _set_user_faculty(db, username.strip().lower(), role, body.faculty_id)
         db.commit()
         invalidate_account_state(username)
 
@@ -683,7 +597,7 @@ def update_local_user_role(
             action="admin.users.role.update",
             outcome="success",
             actor=context.get("username"),
-            details={"target": username.strip().lower(), "role": role},
+            details={"target": username.strip().lower(), "role": role, "faculty_id": body.faculty_id if role == "dean" else None},
             db=db,
             ip_address=client_ip,
         )
@@ -715,11 +629,10 @@ def create_local_user(
     if len((body.password or "").strip()) < 8:
         raise HTTPException(status_code=400, detail="Пароль должен быть не короче 8 символов")
 
-    role = _validate_role(body.role)
+    role = _validate_role(body.role, context.get("role"))
     password_hash, password_salt = _hash_password(body.password)
 
     try:
-        _ensure_users_table(db)
 
         exists = db.execute(
             text("SELECT 1 FROM users WHERE username = :username LIMIT 1"),
@@ -753,6 +666,7 @@ def create_local_user(
                 "password_salt": password_salt,
             },
         )
+        _set_user_faculty(db, username, role, body.faculty_id)
         db.commit()
         invalidate_account_state(username)
 
@@ -818,19 +732,19 @@ def update_local_user(
 
     role = None
     if body.role is not None:
-        role = _validate_role(body.role)
+        role = _validate_role(body.role, context.get("role"))
 
     if not updates and role is None:
         raise HTTPException(status_code=400, detail="Нет данных для обновления")
 
     try:
-        _ensure_users_table(db)
         target = db.execute(
             text("SELECT id FROM users WHERE username = :username LIMIT 1"),
             {"username": normalized},
         ).first()
         if not target:
             raise HTTPException(status_code=404, detail="Пользователь не найден")
+        _guard_superadmin_target(db, normalized, context.get("role"))
 
         if updates:
             set_parts = ", ".join([f"{field} = :{field}" for field in updates.keys()])
@@ -849,6 +763,7 @@ def update_local_user(
                 """),
                 {"role": role, "username": normalized},
             )
+            _set_user_faculty(db, normalized, role, body.faculty_id)
 
         db.commit()
         invalidate_account_state(normalized)
@@ -905,11 +820,10 @@ def delete_local_user(
         raise HTTPException(status_code=400, detail="Нельзя удалить самого себя")
 
     try:
-        _ensure_users_table(db)
 
         target = db.execute(
             text("""
-                SELECT u.id, COALESCE(r.name, 'staff') AS role
+                SELECT u.id, COALESCE(r.name, 'user') AS role
                 FROM users u
                 LEFT JOIN roles r ON r.id = u.role_id
                 WHERE u.username = :username
@@ -920,17 +834,12 @@ def delete_local_user(
         if not target:
             raise HTTPException(status_code=404, detail="Пользователь не найден")
 
-        if (target.get("role") or "staff") == "admin":
-            admins_count = db.execute(
-                text("""
-                    SELECT COUNT(*)
-                    FROM users u
-                    LEFT JOIN roles r ON r.id = u.role_id
-                    WHERE COALESCE(r.name, 'staff') = 'admin'
-                """),
-            ).scalar() or 0
-            if int(admins_count) <= 1:
-                raise HTTPException(status_code=400, detail="Нельзя удалить последнего администратора")
+        _guard_superadmin_target(db, normalized, context.get("role"))
+        target_role = target.get("role") or "user"
+        if target_role == ROLE_SUPERADMIN and _count_role(db, ROLE_SUPERADMIN) <= 1:
+            raise HTTPException(status_code=400, detail="Нельзя удалить последнего суперадминистратора")
+        if target_role in (ROLE_SUPERADMIN, ROLE_ADMIN) and _count_role(db, ROLE_SUPERADMIN, ROLE_ADMIN) <= 1:
+            raise HTTPException(status_code=400, detail="Нельзя удалить последнего администратора")
 
         db.execute(
             text("DELETE FROM users WHERE username = :username"),
@@ -987,13 +896,13 @@ def block_local_user(
     reason = (body.reason or "manual_admin_block").strip()[:255]
 
     try:
-        _ensure_users_table(db)
         target = db.execute(
             text("SELECT id FROM users WHERE username = :username LIMIT 1"),
             {"username": normalized},
         ).first()
         if not target:
             raise HTTPException(status_code=404, detail="Пользователь не найден")
+        _guard_superadmin_target(db, normalized, context.get("role"))
 
         if duration_minutes is None:
             db.execute(
@@ -1061,13 +970,13 @@ def unblock_local_user(
         raise HTTPException(status_code=400, detail="Некорректный логин")
 
     try:
-        _ensure_users_table(db)
         target = db.execute(
             text("SELECT id FROM users WHERE username = :username LIMIT 1"),
             {"username": normalized},
         ).first()
         if not target:
             raise HTTPException(status_code=404, detail="Пользователь не найден")
+        _guard_superadmin_target(db, normalized, context.get("role"))
 
         db.execute(
             text("""

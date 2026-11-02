@@ -31,6 +31,13 @@ services:
     environment:
       # Dev открывается по http: Secure-cookie браузер не сохранил бы (в prod по HTTPS — true по умолчанию)
       - AUTH_COOKIE_SECURE=false
+      # Быстрый вход под каждой ролью на странице входа (routers/dev_login.py). На проде не задаётся.
+      - DEV_QUICK_LOGIN=true
+      # ЭЦП: KalkanCrypt из SDK НУЦ (лицензия — вне git, ~/kalkan-sdk). Принимаются ключи тестового НУЦ (SDK)
+      # и боевого (настоящие ключи); OCSP — свой у каждого (kalkan_service.NCA_OCSP); TSP — тестовый
+      - KALKAN_LIB=/opt/kalkan/lib/libkalkancryptwr-64.so.2.0.14
+      - KALKAN_NCA=test,prod
+      - KALKAN_TSA_URL=http://test.pki.gov.kz/tsp/
     depends_on:
       db:
         condition: service_healthy
@@ -38,6 +45,8 @@ services:
       - ./backend:/app
       # backend/media используется прод-бэкендом, у dev своя копия
       - ./backend/media_dev:/app/media
+      - ../kalkan-sdk/runtime/lib:/opt/kalkan/lib:ro
+      - ../kalkan-sdk/runtime/test-keys:/opt/kalkan/test-keys:ro
     ports:
       - "127.0.0.1:8001:8000"
     extra_hosts:

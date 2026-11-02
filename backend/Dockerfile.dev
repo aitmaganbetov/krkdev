@@ -7,7 +7,22 @@ ENV PYTHONUNBUFFERED=1
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential default-libmysqlclient-dev ffmpeg \
+        libltdl7 libpcsclite1 ca-certificates fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
+
+# KalkanCrypt (ЭЦП НУЦ, services/kalkan_service.py): .so монтируется из SDK, здесь — его окружение.
+# Библиотека собрана с GNU libiconv — shim перенаправляет libiconv* на iconv из glibc.
+RUN printf '%s\n' '#include <iconv.h>' \
+        'iconv_t libiconv_open(const char *t, const char *f) { return iconv_open(t, f); }' \
+        'size_t libiconv(iconv_t c, char **i, size_t *il, char **o, size_t *ol) { return iconv(c, i, il, o, ol); }' \
+        'int libiconv_close(iconv_t c) { return iconv_close(c); }' > /tmp/iconv_shim.c \
+    && gcc -shared -fPIC -O2 -o /usr/local/lib/libiconv_shim.so /tmp/iconv_shim.c \
+    && rm /tmp/iconv_shim.c && ldconfig
+# Kalkan строит цепочку по системному хранилищу (/etc/ssl/certs/ca-certificates.crt); в dev — тестовый
+# и боевой УЦ НУЦ (тестовые ключи SDK и настоящие ключи сотрудников, KALKAN_NCA)
+COPY assets/nca/test/ /usr/local/share/ca-certificates/nca/
+COPY assets/nca/prod/ /usr/local/share/ca-certificates/nca-prod/
+RUN update-ca-certificates
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

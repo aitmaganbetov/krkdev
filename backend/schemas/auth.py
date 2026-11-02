@@ -7,6 +7,11 @@ class LoginRequest(BaseModel):
     password: str = Field(max_length=1024)
 
 
+class EcpLoginRequest(BaseModel):
+    # CMS (base64) от NCALayer с подписанным nonce; с сертификатом и меткой времени — единицы КБ
+    cms: str = Field(min_length=1, max_length=65536)
+
+
 class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"

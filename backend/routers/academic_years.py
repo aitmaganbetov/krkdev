@@ -10,7 +10,7 @@ from database import get_db
 from models.rating_template import RatingTemplate
 from models.record import Record
 from routers.rating_templates import _validate_year
-from services import ROLE_ADMIN, get_current_user_context, require_roles
+from services import ROLE_ADMIN, ROLE_INSPECTOR, get_current_user_context, require_roles
 from services.audit_log import audit_event
 from services.request_meta import get_client_ip
 
@@ -102,7 +102,7 @@ def create_academic_year(
     body: AcademicYearIn,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
 ):
     exists = db.execute(text("SELECT 1 FROM academic_years WHERE name = :name"), {"name": body.name}).first()
     if exists:
@@ -130,7 +130,7 @@ def delete_academic_year(
     name: str,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
 ):
     item = next((item for item in _list(db) if item.name == name), None)
     if not item:
@@ -170,7 +170,7 @@ def set_default_academic_year(
     body: DefaultYearIn,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN)),
+    current_user: dict[str, str] = Depends(require_roles(ROLE_ADMIN, ROLE_INSPECTOR)),
 ):
     if body.name and body.name not in {item.name for item in _list(db)}:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Учебный год не найден")

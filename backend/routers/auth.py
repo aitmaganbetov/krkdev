@@ -1,24 +1,28 @@
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from threading import Lock
+import logging
 import os
+import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from database import get_db
-from schemas.auth import LoginRequest, TokenOut
+from schemas.auth import EcpLoginRequest, LoginRequest, TokenOut
+from services import kalkan_service
 from services.request_meta import get_client_ip
 from services.auth_service import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     AUTH_COOKIE_NAME,
-    _ensure_users_table,
     authenticate_user_details,
     create_access_token,
     get_current_user_context,
-    _resolve_access_token,
+    resolve_ecp_account,
 )
 from services.audit_log import audit_event
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -225,7 +229,6 @@ def login(body: LoginRequest, request: Request, response: Response, db: Session 
             detail="Слишком много попыток входа. Попробуйте позже.",
         )
 
-    _ensure_users_table(db)
 
     blocked, block_reason, blocked_until = _read_user_block_state(db, username, now)
     if blocked:
@@ -309,7 +312,11 @@ def login(body: LoginRequest, request: Request, response: Response, db: Session 
         db=db,
         ip_address=client_ip,
     )
-    token = create_access_token({"sub": normalized_username, "role": role, "auth_source": source})
+    return _start_session(response, normalized_username, role, source)
+
+
+def _start_session(response: Response, username: str, role: str, source: str) -> TokenOut:
+    token = create_access_token({"sub": username, "role": role, "auth_source": source})
     response.set_cookie(
         key=AUTH_COOKIE_NAME,
         value=token,
@@ -320,6 +327,122 @@ def login(body: LoginRequest, request: Request, response: Response, db: Session 
         path="/",
     )
     return TokenOut(access_token=token, role=role)
+
+
+# Вход по ЭЦП НУЦ: браузер получает одноразовый nonce, подписывает его в NCALayer (CMS с данными),
+# сервер проверяет подпись (цепочка до НУЦ, OCSP), гасит nonce и ищет учётную запись по ИИН из сертификата.
+# Nonce хранится в памяти процесса, как и счётчики попыток (backend — один воркер uvicorn).
+ECP_NONCE_TTL_SECONDS = 300
+ECP_NONCE_PREFIX = "krk-ecp-login:"
+_ecp_nonces: dict[str, datetime] = {}
+_ecp_lock = Lock()
+
+ECP_REJECT_MESSAGES = {
+    "iin_not_found": "Владелец сертификата не найден среди преподавателей и студентов Platonus",
+    "tutor_login_missing": "В Platonus не указан логин владельца сертификата — вход по ЭЦП невозможен",
+    "tutor_ambiguous": "ИИН сертификата указан у нескольких человек в Platonus — обратитесь к администратору",
+    "iin_unavailable": "Справочник преподавателей не синхронизирован с Platonus",
+}
+
+
+def _iin_hint(iin: str) -> str:
+    # ИИН — персональные данные (в нём дата рождения): в журнал — только последние цифры
+    return f"********{iin[-4:]}" if iin else ""
+
+
+@router.get("/ecp")
+def ecp_status():
+    return {"enabled": kalkan_service.is_available()}
+
+
+@router.post("/ecp/challenge")
+def ecp_challenge(request: Request):
+    now = datetime.now(timezone.utc)
+    if not kalkan_service.is_available():
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Вход по ЭЦП не настроен")
+    if _is_rate_limited(_attempt_keys("ecp", get_client_ip(request)), now):
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Слишком много попыток входа. Попробуйте позже.")
+    nonce = ECP_NONCE_PREFIX + secrets.token_urlsafe(32)
+    with _ecp_lock:
+        for key in [k for k, expires in _ecp_nonces.items() if expires <= now]:
+            _ecp_nonces.pop(key, None)
+        if len(_ecp_nonces) >= 10000:
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Слишком много попыток входа. Попробуйте позже.")
+        _ecp_nonces[nonce] = now + timedelta(seconds=ECP_NONCE_TTL_SECONDS)
+    return {"nonce": nonce, "expires_in": ECP_NONCE_TTL_SECONDS}
+
+
+def _consume_ecp_nonce(nonce: str, now: datetime) -> bool:
+    with _ecp_lock:
+        expires = _ecp_nonces.pop(nonce, None)
+    return expires is not None and now < expires
+
+
+@router.post("/ecp/login", response_model=TokenOut)
+def ecp_login(body: EcpLoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
+    now = datetime.now(timezone.utc)
+    client_ip = get_client_ip(request)
+    pair_key, ip_key = _attempt_keys("ecp", client_ip)
+
+    def reject(reason: str, detail: str, code: int = status.HTTP_401_UNAUTHORIZED, actor: str = "unknown", **extra):
+        if code == status.HTTP_401_UNAUTHORIZED and _register_failed_attempt(pair_key, ip_key, now):
+            reason, code, detail = "too_many_failed_attempts", status.HTTP_429_TOO_MANY_REQUESTS, "Слишком много попыток входа. Попробуйте позже."
+        audit_event(
+            action="auth.ecp_login",
+            outcome="blocked" if code in (status.HTTP_403_FORBIDDEN, status.HTTP_429_TOO_MANY_REQUESTS) else "failure",
+            actor=actor,
+            details={"ip": client_ip, "reason": reason, **extra},
+            db=db,
+            ip_address=client_ip,
+        )
+        raise HTTPException(status_code=code, detail=detail)
+
+    if _is_rate_limited((pair_key, ip_key), now):
+        reject("rate_limited", "Слишком много попыток входа. Попробуйте позже.", status.HTTP_429_TOO_MANY_REQUESTS)
+    if not kalkan_service.is_available():
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Вход по ЭЦП не настроен")
+
+    try:
+        result = kalkan_service.verify_cms(body.cms)
+    except kalkan_service.KalkanError as exc:
+        error = str(exc)
+        logger.info("ЭЦП: подпись отклонена: %s", error[-300:])
+        reason = kalkan_service.rejection_reason(exc)
+        if reason:
+            # Издатель и срок — без ИИН: только реквизиты удостоверяющего центра
+            reject(reason[0], reason[1], issuer=(exc.cert.issuer_dn if exc.cert else "")[:200],
+                   valid_to=exc.cert.not_after if exc.cert else "")
+        if "OCSP" in error and ("connect" in error.lower() or "0x8f00031" in error.lower()):
+            reject("ocsp_unavailable", "Сервис проверки сертификатов НУЦ недоступен. Попробуйте позже.",
+                   status.HTTP_503_SERVICE_UNAVAILABLE)
+        reject("signature_invalid", "Подпись не прошла проверку", error=error[-200:])
+
+    cert = result.cert
+    extra = {"cert_sn": cert.extra.get("cert_sn", ""), "iin_hint": _iin_hint(cert.iin)}
+    if not _consume_ecp_nonce((result.data or b"").decode("utf-8", "replace"), now):
+        reject("nonce_invalid", "Запрос на вход устарел. Попробуйте ещё раз.", **extra)
+    if not cert.iin:
+        reject("no_iin", "В сертификате нет ИИН", **extra)
+
+    username, role, source = resolve_ecp_account(db, cert.iin)
+    if not username:
+        reject(source, ECP_REJECT_MESSAGES.get(source, "Вход по ЭЦП невозможен"), **extra)
+
+    blocked, block_reason, blocked_until = _read_user_block_state(db, username, now)
+    if blocked:
+        reject(block_reason or "user_blocked", _block_message(block_reason, blocked_until), status.HTTP_403_FORBIDDEN,
+               actor=username, **extra)
+
+    _clear_attempts(pair_key)
+    audit_event(
+        action="auth.ecp_login",
+        outcome="success",
+        actor=username,
+        details={"ip": client_ip, "role": role, "source": source, **extra},
+        db=db,
+        ip_address=client_ip,
+    )
+    return _start_session(response, username, role, source)
 
 
 @router.post("/logout")
@@ -351,4 +474,9 @@ def logout(
 @router.get("/me")
 def me(request: Request, db: Session = Depends(get_db)):
     context = _resolve_me_context(request, db)
-    return context
+    # ФИО для шапки интерфейса; у учётной записи без имени (или где имя = логин) — пусто
+    name = db.execute(
+        text("SELECT display_name FROM users WHERE username = :username LIMIT 1"),
+        {"username": context.get("username")},
+    ).scalar()
+    return {**context, "display_name": name if name and name != context.get("username") else ""}

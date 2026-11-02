@@ -7,7 +7,7 @@ ENV PYTHONUNBUFFERED=1
 
 # ffmpeg — снимки и видео с камер. Компиляторы не нужны: все зависимости ставятся из wheels.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends ffmpeg fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 # Процесс приложения работает не от root. uid 1000 совпадает с владельцем backend/media на хосте.

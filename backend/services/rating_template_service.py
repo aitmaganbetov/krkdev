@@ -13,7 +13,6 @@ from models.rating_template import RatingTemplate
 
 logger = logging.getLogger(__name__)
 
-CALC_METHODS = ("average", "weighted", "sections", "sum")
 
 # Пороги, которые действовали до появления справочника (score < 5 OR attendance < 40).
 LEGACY_PROBLEM_SCORE_BELOW = 5.0

@@ -37,4 +37,11 @@ export const STATES = [
     // «Удалить» активна только у года без записей и вопросов (в фикстурах — 2027-2028)
     action: (page, lang) => page.locator('main button:visible:not([disabled])', { hasText: pick(ui, lang, 'ui.delete') }).first().click(),
   },
+  {
+    name: 'schedule-lesson-modal',
+    path: '/schedule',
+    visual: false,
+    // Карточка занятия: строка таблицы на десктопе или карточка списка на телефоне
+    action: (page) => page.locator('main tr[tabindex="0"]:visible, main [role="button"][tabindex="0"]:visible').first().click(),
+  },
 ]

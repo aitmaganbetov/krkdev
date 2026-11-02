@@ -19,7 +19,7 @@ for (const name of KEY_PAGES) {
   for (const v of VARIANTS) {
     test(`visual: ${name} ${v.id}`, async ({ page }) => {
       await page.setViewportSize({ width: v.width, height: v.height })
-      await setupApp(page, { lang: v.lang, theme: v.theme, auth: pg.auth !== false })
+      await setupApp(page, { lang: v.lang, theme: v.theme, auth: pg.auth !== false, role: pg.role })
       await open(page, pg.path)
       await expect(page).toHaveScreenshot(`${name}-${v.id}.png`, { fullPage: !VIEWPORT_ONLY.has(name) })
     })

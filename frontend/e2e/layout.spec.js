@@ -10,7 +10,7 @@ for (const pg of PAGES) {
       for (const width of WIDTHS) {
         test(`${lang} ${width}`, async ({ page }) => {
           await page.setViewportSize({ width, height: HEIGHTS[width] })
-          await setupApp(page, { lang, auth: pg.auth !== false })
+          await setupApp(page, { lang, auth: pg.auth !== false, role: pg.role })
           await open(page, pg.path)
           await expectNoLayoutDefects(page, `${pg.name} ${lang} ${width}`)
         })

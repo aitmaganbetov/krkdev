@@ -32,6 +32,9 @@ export function layoutChecks() {
   const txt = (el) => (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60)
 
   const isVisible = (el) => {
+    // Содержимое свёрнутого <details> не показывается, но Chromium считает ему координаты
+    const closed = el.closest('details:not([open])')
+    if (closed && !el.closest('summary')) return false
     for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
       const cs = getComputedStyle(n)
       if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) return false

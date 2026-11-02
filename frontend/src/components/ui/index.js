@@ -1,9 +1,9 @@
 // Библиотека компонентов Sapa. Документация: docs/redesign/design-system.md
 export { cn } from './cn'
-export { default as Icon, ICON_NAMES } from './Icon'
+export { default as Icon } from './Icon'
 export { default as Button } from './Button'
 export { default as Spinner, LoadingBlock } from './Spinner'
-export { Field, Input, SearchInput, Textarea, Select, Checkbox, FieldControl } from './Field'
+export { Field, Input, SearchInput, Textarea, Select, Checkbox } from './Field'
 export { Card, CardHeader, CardBody, CardFooter } from './Card'
 export { default as Badge } from './Badge'
 export { Alert, EmptyState, Skeleton, SkeletonText } from './Feedback'
@@ -17,3 +17,5 @@ export { PageHeader, PageStack, FilterBar, StatCard, DescriptionList, FormSectio
 export { default as Menu } from './Menu'
 export { default as useScrollFade } from './useScrollFade'
 export { default as Switch } from './Switch'
+export { default as RadioGroup } from './RadioGroup'
+export { default as Combobox } from './Combobox'

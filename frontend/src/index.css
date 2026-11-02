@@ -32,44 +32,7 @@
   .dark input[type='date']::-webkit-calendar-picker-indicator { filter: invert(0.85); }
 }
 
-/*
- * Совместимость: классы, которые использует разметка страниц (btn-*, card, input, label, badge),
- * переведены на токены дизайн-системы. Новый код использует компоненты из src/components/ui.
- */
 @layer components {
-  .btn {
-    @apply inline-flex min-h-10 shrink-0 cursor-pointer select-none items-center justify-center gap-2 whitespace-nowrap rounded-md border border-transparent px-4 py-2 text-sm font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50;
-  }
-  .btn-primary   { @apply btn bg-primary text-primary-on hover:bg-primary-hover; }
-  .btn-secondary { @apply btn border-line-strong bg-surface text-fg hover:bg-surface-hover; }
-  .btn-ghost     { @apply btn text-fg-muted hover:bg-surface-hover hover:text-fg; }
-  .btn-danger    { @apply btn bg-danger-solid text-danger-on hover:opacity-90; }
-  .btn-warning   { @apply btn bg-warning-solid text-warning-on hover:opacity-90; }
-  .btn-success   { @apply btn bg-success-solid text-success-on hover:opacity-90; }
-
-  .card {
-    @apply min-w-0 rounded-lg border border-line bg-surface shadow-1;
-  }
-
-  .input {
-    @apply block min-h-10 w-full min-w-0 rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-fg transition-colors duration-150 placeholder:text-fg-subtle hover:border-fg-subtle disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-fg-subtle;
-  }
-  .input:focus {
-    @apply border-primary outline-none;
-    box-shadow: 0 0 0 3px rgb(var(--focus) / 0.25);
-  }
-  select.input {
-    @apply cursor-pointer appearance-none bg-no-repeat pr-9;
-    text-overflow: ellipsis;
-    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%235F6E7F' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.6' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
-    background-position: right 0.625rem center;
-    background-size: 1.125rem;
-  }
-  .dark select.input {
-    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%23A7B5C5' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.6' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
-  }
-  textarea.input { @apply min-h-[5rem] resize-y leading-relaxed; }
-
   .select-chevron {
     background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%235F6E7F' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.6' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
     background-position: right 0.625rem center;
@@ -78,13 +41,6 @@
   }
   .dark .select-chevron {
     background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%23A7B5C5' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.6' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
-  }
-
-  .label {
-    @apply mb-1.5 block text-sm font-medium text-fg;
-  }
-  .badge {
-    @apply inline-flex max-w-full items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium;
   }
 }
 
@@ -128,12 +84,6 @@
     margin: 0 !important;
     padding: 0 !important;
     overflow: visible !important;
-  }
-
-  .card {
-    box-shadow: none !important;
-    border-color: #d1d5db !important;
-    break-inside: avoid;
   }
 
   .truncate {

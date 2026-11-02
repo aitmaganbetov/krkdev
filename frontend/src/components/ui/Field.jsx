@@ -1,4 +1,4 @@
-import { cloneElement, createContext, forwardRef, isValidElement, useContext, useEffect, useId, useLayoutEffect, useRef } from 'react'
+import { createContext, forwardRef, useContext, useEffect, useId, useLayoutEffect, useRef } from 'react'
 import { cn } from './cn'
 import Icon from './Icon'
 
@@ -41,7 +41,8 @@ export function Field({ label, hint, error, required, htmlFor, className, childr
   )
 }
 
-function useFieldProps(props) {
+/** id, aria-describedby, aria-invalid и required от окружающего Field — для собственных контролов (Combobox). */
+export function useFieldProps(props) {
   const ctx = useContext(FieldContext)
   if (!ctx) return props
   return {
@@ -57,6 +58,8 @@ const controlBase =
   'block w-full min-w-0 rounded-md border bg-surface text-sm text-fg transition-colors duration-150 ' +
   'placeholder:text-fg-subtle hover:border-fg-subtle ' +
   'focus:border-primary focus:outline-none focus:ring-[3px] focus:ring-focus/25 ' +
+  // Поле даты/времени отдаёт фокус внутренним сегментам (день, месяц, год) — :focus у самого поля не срабатывает
+  'focus-within:border-primary focus-within:ring-[3px] focus-within:ring-focus/25 ' +
   'disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-fg-subtle disabled:hover:border-line-strong ' +
   'aria-[invalid=true]:border-danger aria-[invalid=true]:focus:ring-danger/20'
 
@@ -178,28 +181,24 @@ export const Select = forwardRef(function Select({ className, size = 'md', optio
 export const Checkbox = forwardRef(function Checkbox({ label, description, className, ...props }, ref) {
   const id = useId()
   const inputId = props.id || id
+  const input = (
+    <input
+      ref={ref}
+      id={inputId}
+      type="checkbox"
+      className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded-sm border-line-strong accent-[rgb(var(--primary))] focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed"
+      {...props}
+    />
+  )
+  if (!label && !description) return <div className={cn('flex min-w-0 items-start', className)}>{input}</div>
+  // Вся строка — подпись поля: на телефоне нажимается не только квадрат 16px, но и текст с промежутком
   return (
-    <div className={cn('flex min-w-0 items-start gap-2.5', className)}>
-      <input
-        ref={ref}
-        id={inputId}
-        type="checkbox"
-        className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded-sm border-line-strong accent-[rgb(var(--primary))] focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed"
-        {...props}
-      />
-      {(label || description) && (
-        <label htmlFor={inputId} className="min-w-0 cursor-pointer text-sm text-fg">
-          {label}
-          {description && <span className="mt-0.5 block text-xs text-fg-subtle">{description}</span>}
-        </label>
-      )}
-    </div>
+    <label htmlFor={inputId} className={cn('flex min-w-0 cursor-pointer items-start gap-2.5', props.disabled && 'cursor-not-allowed', className)}>
+      {input}
+      <span className="min-w-0 text-sm text-fg">
+        {label}
+        {description && <span className="mt-0.5 block text-xs text-fg-subtle">{description}</span>}
+      </span>
+    </label>
   )
 })
-
-/** Обёртка, чтобы передать в Field произвольный контрол (например, сторонний). */
-export function FieldControl({ children }) {
-  const ctx = useContext(FieldContext)
-  if (!ctx || !isValidElement(children)) return children
-  return cloneElement(children, { id: children.props.id || ctx.id, 'aria-describedby': ctx.describedBy })
-}

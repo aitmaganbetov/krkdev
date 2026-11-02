@@ -53,7 +53,7 @@ const Button = forwardRef(function Button(
       {...rest}
     >
       {loading ? <Spinner size={iconSize} /> : icon && <Icon name={icon} size={iconSize} />}
-      {!iconOnly && children != null && <span className="min-w-0 break-words text-center leading-5">{children}</span>}
+      {!iconOnly && children != null && <span className="min-w-0 hyphens-auto break-words text-center leading-5">{children}</span>}
       {!iconOnly && iconRight && <Icon name={iconRight} size={iconSize} />}
     </Comp>
   )

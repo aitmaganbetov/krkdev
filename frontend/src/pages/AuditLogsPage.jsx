@@ -7,26 +7,8 @@ import {
   Pagination, Select, StatCard, TruncatedText,
 } from '../components/ui'
 
-// Код действия бэкенда → ключ подписи auditLog.actions.* (точки и дефисы заменены на «_»)
-const ACTION_LABEL_KEYS = {
-  'auth.login': 'auth_login',
-  'auth.logout': 'auth_logout',
-  'auth.me': 'auth_me',
-  'record.create': 'record_create',
-  'record.update': 'record_update',
-  'record.delete': 'record_delete',
-  'record.submit': 'record_submit',
-  'record.send_to_rework': 'record_send_to_rework',
-  'record.accept': 'record_accept',
-  'admin.users.create': 'admin_users_create',
-  'admin.users.update': 'admin_users_update',
-  'admin.users.role.update': 'admin_users_role_update',
-  'admin.users.block': 'admin_users_block',
-  'admin.users.unblock': 'admin_users_unblock',
-  'admin.users.delete': 'admin_users_delete',
-  'admin.migrate.faculties': 'admin_migrate_faculties',
-  'admin.migrate.records-submitted-by': 'admin_migrate_records_submitted_by',
-}
+// Подпись действия — auditLog.actions.<код, где точки и дефисы заменены на «_»>; без перевода — сам код
+const actionLabelKey = (action) => `auditLog.actions.${String(action || '').replace(/[.-]/g, '_')}`
 
 // Результат → тон бейджа
 const OUTCOME_TONES = {
@@ -52,7 +34,7 @@ const PERIODS = [1, 7, 30, 90]
 const PAGE_SIZE = 50
 
 export default function AuditLogsPage() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [logs, setLogs] = useState([])
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -105,7 +87,7 @@ export default function AuditLogsPage() {
     ? (error.response?.status === 404 ? t('auditLog.unavailable') : apiErrorText(error, t('common.error')))
     : ''
 
-  const getActionLabel = (action) => (ACTION_LABEL_KEYS[action] ? t(`auditLog.actions.${ACTION_LABEL_KEYS[action]}`) : action)
+  const getActionLabel = (action) => (i18n.exists(actionLabelKey(action)) ? t(actionLabelKey(action)) : action)
 
   const getOutcomeLabel = (outcome) => (OUTCOME_TONES[outcome] ? t(`auditLog.outcomes.${outcome}`) : outcome)
 

@@ -1,19 +1,33 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { apiErrorText, blockLocalUser, createLocalUser, deleteLocalUser, getLocalUsers, unblockLocalUser, updateLocalUser, updateLocalUserRole } from '../services/api'
+import { apiErrorText, blockLocalUser, createLocalUser, deleteLocalUser, getBasicInfoCatalog, getLocalUsers, unblockLocalUser, updateLocalUser, updateLocalUserRole } from '../services/api'
 import { formatDateTimeUtcPlus5 } from '../utils/datetime'
+import { useAuth } from '../context/AuthContext'
+import { SUPERADMIN, isSuperadmin } from '../utils/roles'
 import {
   Alert, Badge, Button, Card, CardHeader, DataTable, EmptyState, Field, FilterBar, Input, Modal,
-  PageHeader, PageStack, SearchInput, Select, Spinner, useUI,
+  SearchInput, Select, Spinner, useUI,
 } from '../components/ui'
+import { localizedName } from '../utils/locale'
 
 // Значения ролей уходят в API как есть; подписи — из shell.roles.*
-const ROLE_VALUES = ['admin', 'inspector', 'staff']
+const ROLE_VALUES = ['student', 'teacher', 'user', 'staff', 'peer_inspector', 'inspector', 'admin']
+// Деканат выбирается вместе с факультетом одним пунктом: значение «dean:<FacultyID>»
+const roleValue = (user) => (user.role === 'dean' ? `dean:${user.faculty_id ?? ''}` : (user.role || 'user'))
+const parseRole = (value) => {
+  const [role, faculty] = String(value).split(':')
+  return { role, faculty_id: role === 'dean' && faculty ? Number(faculty) : null }
+}
 const CREATE_FORM_ID = 'create-user-form'
 
 export default function UsersPage() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { toast, confirm } = useUI()
+  // Роль суперадминистратора назначает и его учётную запись меняет только суперадминистратор (как в routers/users.py)
+  const { role: myRole } = useAuth()
+  const canManageSuperadmin = isSuperadmin(myRole)
+  const assignableRoles = canManageSuperadmin ? [...ROLE_VALUES, SUPERADMIN] : ROLE_VALUES
+  const isLocked = (user) => user.role === SUPERADMIN && !canManageSuperadmin
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -25,8 +39,13 @@ export default function UsersPage() {
   const [creating, setCreating] = useState(false)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [editingUser, setEditingUser] = useState(null)
-  const [newUser, setNewUser] = useState({ username: '', display_name: '', password: '', role: 'staff' })
-  const [editForm, setEditForm] = useState({ display_name: '', password: '', role: 'staff' })
+  const [newUser, setNewUser] = useState({ username: '', display_name: '', password: '', role: 'user' })
+  const [editForm, setEditForm] = useState({ display_name: '', password: '', role: 'user' })
+
+  const [faculties, setFaculties] = useState([])
+  useEffect(() => {
+    getBasicInfoCatalog().then((data) => setFaculties(data.faculties || [])).catch(() => {})
+  }, [])
 
   useEffect(() => {
     getLocalUsers()
@@ -46,18 +65,25 @@ export default function UsersPage() {
       const username = (user.username || '').toLowerCase()
       const displayName = (user.display_name || '').toLowerCase()
       const matchesQuery = !q || username.includes(q) || displayName.includes(q)
-      const matchesRole = !r || (user.role || 'staff') === r
+      const matchesRole = !r || (user.role || 'user') === r || roleValue(user) === r
       return matchesQuery && matchesRole
     })
   }, [users, query, filterRole])
 
-  const roleOptions = ROLE_VALUES.map((value) => ({ value, label: t(`shell.roles.${value}`) }))
+  const roleOptions = [
+    ...assignableRoles.map((value) => ({ value, label: t(`shell.roles.${value}`) })),
+    // Назначается только по составу комитета (раздел «Комитет КРК»): в списке — для отображения
+    { value: 'committee', label: t('shell.roles.committee'), disabled: true },
+    ...faculties.map((faculty) => ({ value: `dean:${faculty.id}`, label: t('usersPage.deanOf', { faculty: localizedName(faculty, 'name', i18n.language) }) })),
+  ]
+  const filterRoleOptions = [...ROLE_VALUES, 'committee', 'dean', SUPERADMIN].map((value) => ({ value, label: t(`shell.roles.${value}`) }))
   const filtersActive = !!(query.trim() || filterRole.trim())
 
   const handleRoleChange = async (username, role) => {
     setSavingRoleFor(username)
     try {
-      const updated = await updateLocalUserRole(username, role)
+      const parsed = parseRole(role)
+      const updated = await updateLocalUserRole(username, parsed.role, parsed.faculty_id)
       setUsers((prev) => prev.map((item) => (item.username === username ? updated : item)))
       toast.success(t('usersPage.roleChanged', { username }))
     } catch {
@@ -72,9 +98,9 @@ export default function UsersPage() {
     setError('')
     setCreating(true)
     try {
-      const created = await createLocalUser(newUser)
+      const created = await createLocalUser({ ...newUser, ...parseRole(newUser.role) })
       setUsers((prev) => [created, ...prev])
-      setNewUser({ username: '', display_name: '', password: '', role: 'staff' })
+      setNewUser({ username: '', display_name: '', password: '', role: 'user' })
       toast.success(t('usersPage.created', { username: created?.username || newUser.username }))
     } catch (err) {
       setError(apiErrorText(err, t('users.createError')))
@@ -151,13 +177,13 @@ export default function UsersPage() {
     setEditForm({
       display_name: user.display_name || '',
       password: '',
-      role: user.role || 'staff',
+      role: roleValue(user),
     })
   }
 
   const cancelEdit = () => {
     setEditingUser(null)
-    setEditForm({ display_name: '', password: '', role: 'staff' })
+    setEditForm({ display_name: '', password: '', role: 'user' })
   }
 
   const saveEdit = async (username) => {
@@ -165,7 +191,7 @@ export default function UsersPage() {
     try {
       const payload = {
         display_name: editForm.display_name,
-        role: editForm.role,
+        ...parseRole(editForm.role),
       }
       if (editForm.password.trim()) {
         payload.password = editForm.password
@@ -206,6 +232,7 @@ export default function UsersPage() {
         </div>
       )
     }
+    if (isLocked(user)) return null
     const blockLabel = user.is_blocked ? t('users.unblockBtn') : t('users.blockBtn')
     const blockAria = t(user.is_blocked ? 'usersPage.unblockAria' : 'usersPage.blockAria', { username: user.username })
     const blockIcon = user.is_blocked ? 'unlock' : 'lock'
@@ -260,25 +287,28 @@ export default function UsersPage() {
     {
       key: 'role',
       header: t('users.roleCol'),
-      // Селект роли всегда не уже 10rem (+ поля ячейки) — дефект аудита №3
-      minWidth: '12rem',
+      // Селект роли в таблице (≥ md) не уже 15rem: «Суперадминистратор» и «Инспектор взаимопосещения» помещаются целиком;
+      // длинные подписи деканатов Select показывает полностью во всплывающей подсказке
+      minWidth: '17rem',
       cell: (user) => (isEditing(user) ? (
         <Select
           size="sm"
-          className="min-w-[10rem]"
+          className="min-w-[10rem] md:min-w-[15rem]"
           aria-label={t('usersPage.roleOf', { username: user.username })}
           options={roleOptions}
           value={editForm.role}
           onChange={(e) => setEditForm((prev) => ({ ...prev, role: e.target.value }))}
         />
+      ) : isLocked(user) ? (
+        <Badge tone="primary">{t('shell.roles.superadmin')}</Badge>
       ) : (
         <div className="flex min-w-0 items-center gap-2">
           <Select
             size="sm"
-            className="min-w-[10rem] flex-1"
+            className="min-w-[10rem] flex-1 md:min-w-[15rem]"
             aria-label={t('usersPage.roleOf', { username: user.username })}
             options={roleOptions}
-            value={user.role || 'staff'}
+            value={roleValue(user)}
             disabled={savingRoleFor === user.username}
             onChange={(e) => handleRoleChange(user.username, e.target.value)}
           />
@@ -335,13 +365,9 @@ export default function UsersPage() {
     ? t('usersPage.shown', { shown: filtered.length, total: users.length })
     : t('users.total', { count: filtered.length })
 
+  // Вкладка раздела «Пользователи» (UsersSectionPage): заголовок страницы — у раздела
   return (
-    <PageStack>
-      <PageHeader
-        title={t('users.title')}
-        description={t('usersPage.description')}
-        actions={<Button icon="plus" onClick={openCreateModal}>{t('usersPage.add')}</Button>}
-      />
+    <div className="flex min-w-0 flex-col gap-4">
 
       {error && !showCreateModal && <Alert tone="danger" onClose={() => setError('')} closeLabel={t('ui.close')}>{error}</Alert>}
 
@@ -355,7 +381,7 @@ export default function UsersPage() {
         </Field>
         <Field label={t('users.filterByRole')}>
           <Select
-            options={roleOptions}
+            options={filterRoleOptions}
             placeholder={t('users.allRoles')}
             value={filterRole}
             onChange={(e) => setFilterRole(e.target.value)}
@@ -366,7 +392,11 @@ export default function UsersPage() {
       {/* Без данных при ошибке загрузки таблицу не показываем — достаточно сообщения выше */}
       {!(error && !loading && users.length === 0) && (
         <Card>
-          <CardHeader title={t('usersPage.listTitle')} description={loading ? null : countText} />
+          <CardHeader
+            title={t('usersPage.listTitle')}
+            description={loading ? null : countText}
+            actions={<Button icon="plus" size="sm" onClick={openCreateModal}>{t('usersPage.add')}</Button>}
+          />
           <DataTable
             columns={columns}
             rows={filtered}
@@ -434,6 +464,6 @@ export default function UsersPage() {
           </div>
         </form>
       </Modal>
-    </PageStack>
+    </div>
   )
 }

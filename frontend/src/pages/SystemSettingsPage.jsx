@@ -4,9 +4,11 @@ import {
   apiErrorText,
   getAiSettings,
   getBasicInfoCatalog,
+  getCameraSettings,
   getPlatonusStatus,
   getLdapSettings,
   saveAiSettings,
+  saveCameraSettings,
   saveLdapSettings,
   syncPlatonusCatalogs,
   testAiProvider,
@@ -15,6 +17,7 @@ import {
 import {
   Alert, Badge, Button, Card, CardBody, CardFooter, CardHeader, Field, FormSection, Input, PageHeader, PageStack, SkeletonText, Spinner, Switch, Textarea, cn,
 } from '../components/ui'
+import { regionLocale } from '../utils/locale'
 
 function countGroups(faculties = []) {
   return faculties.reduce((total, faculty) => (
@@ -48,8 +51,11 @@ const AI_PROVIDERS = [
 const CATALOG_LABEL_KEYS = {
   tutors: 'settings.teachers',
   faculties: 'settings.faculties',
+  cafedras: 'settings.cafedras',
   specializations: 'settings.specializations',
   groups: 'settings.groups',
+  students: 'settingsPage.platonus.students',
+  rooms: 'settingsPage.platonus.rooms',
 }
 
 const CATALOG_STATUS_TONES = {
@@ -58,8 +64,6 @@ const CATALOG_STATUS_TONES = {
   unavailable: 'danger',
   local_error: 'danger',
 }
-
-const DATE_LOCALES = { ru: 'ru-RU', kz: 'kk-KZ', en: 'en-GB' }
 
 // Примеры значений — технические строки, не переводятся
 const PLACEHOLDERS = {
@@ -105,6 +109,11 @@ export default function SystemSettingsPage() {
   const [aiTesting, setAiTesting] = useState('')
   const [aiNotice, setAiNotice] = useState('')
   const [aiError, setAiError] = useState('')
+  const [cameras, setCameras] = useState(null)
+  const [cameraLimit, setCameraLimit] = useState('')
+  const [camerasSaving, setCamerasSaving] = useState(false)
+  const [camerasNotice, setCamerasNotice] = useState('')
+  const [camerasError, setCamerasError] = useState('')
 
   const load = async () => {
     setLoading(true)
@@ -162,12 +171,24 @@ export default function SystemSettingsPage() {
       .finally(() => setAiLoading(false))
   }, [])
 
+  const applyCameras = (data) => {
+    setCameras(data)
+    setCameraLimit(String(data.live_max_streams))
+  }
+
+  useEffect(() => {
+    getCameraSettings()
+      .then(applyCameras)
+      .catch((err) => setCamerasError(apiErrorText(err, t('settingsPage.cameras.loadError'))))
+  }, [])
+
   const stats = useMemo(() => {
     const faculties = catalog?.faculties || []
     const specializations = faculties.reduce((sum, faculty) => sum + (faculty.specializations?.length || 0), 0)
     return {
       teachers: catalog?.teachers?.length || 0,
       faculties: faculties.length,
+      cafedras: catalog?.cafedras?.length || 0,
       specializations,
       groups: countGroups(faculties),
     }
@@ -273,9 +294,26 @@ export default function SystemSettingsPage() {
     }
   }
 
+  const cameraLimitValue = Number(cameraLimit)
+  const cameraLimitValid = Number.isInteger(cameraLimitValue) && cameraLimitValue >= 1 && cameraLimitValue <= 20
+
+  const handleSaveCameras = async () => {
+    setCamerasNotice('')
+    setCamerasError('')
+    setCamerasSaving(true)
+    try {
+      applyCameras(await saveCameraSettings({ live_max_streams: cameraLimitValue }))
+      setCamerasNotice(t('settingsPage.cameras.saved'))
+    } catch (err) {
+      setCamerasError(apiErrorText(err, t('settingsPage.cameras.saveError')))
+    } finally {
+      setCamerasSaving(false)
+    }
+  }
+
   // --- Отображение ---
 
-  const dateLocale = DATE_LOCALES[i18n.language] || 'ru-RU'
+  const dateLocale = regionLocale(i18n.language)
   const modelLabel = (name, tag) => (tag ? `${name} · ${t(`settingsPage.ai.modelTags.${tag}`)}` : name)
 
   // Состояние подключения к Platonus: бейдж + текст
@@ -290,8 +328,11 @@ export default function SystemSettingsPage() {
   const catalogItems = platonusStatus?.catalogs || [
     { key: 'tutors', label: t('settings.teachers'), local_count: stats.teachers },
     { key: 'faculties', label: t('settings.faculties'), local_count: stats.faculties },
+    { key: 'cafedras', label: t('settings.cafedras'), local_count: stats.cafedras },
     { key: 'specializations', label: t('settings.specializations'), local_count: stats.specializations },
     { key: 'groups', label: t('settings.groups'), local_count: stats.groups },
+    { key: 'students', label: t('settingsPage.platonus.students') },
+    { key: 'rooms', label: t('settingsPage.platonus.rooms') },
   ]
 
   const closeLabel = t('ui.close')
@@ -327,7 +368,7 @@ export default function SystemSettingsPage() {
 
           <div>
             <h3 className="mb-3 text-sm font-semibold text-fg">{t('settingsPage.platonus.catalogsTitle')}</h3>
-            <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7">
               {catalogItems.map((item) => {
                 const statusKey = CATALOG_STATUS_TONES[item.status] ? item.status : 'pending'
                 const label = CATALOG_LABEL_KEYS[item.key] ? t(CATALOG_LABEL_KEYS[item.key]) : item.label
@@ -364,6 +405,52 @@ export default function SystemSettingsPage() {
             title={!platonusStatus?.connected ? t('settingsPage.platonus.syncNeedsConnection') : undefined}
           >
             {platonusSyncing ? t('settingsPage.platonus.syncing') : t('settingsPage.platonus.sync')}
+          </Button>
+        </CardFooter>
+      </Card>
+
+      {/* Трансляции камер */}
+      <Card>
+        <CardHeader title={t('settingsPage.cameras.title')} description={t('settingsPage.cameras.description')} />
+        <CardBody className="flex flex-col gap-4">
+          {!cameras && !camerasError ? (
+            <div role="status" aria-busy="true"><SkeletonText lines={2} /></div>
+          ) : cameras && (
+            <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+              <Field
+                label={t('settingsPage.cameras.limit')}
+                hint={t('settingsPage.cameras.limitHint', { cpu: cameras.cpu_count, env: cameras.default_live_max_streams })}
+                error={cameraLimit !== '' && !cameraLimitValid ? t('settingsPage.cameras.limitRange') : undefined}
+              >
+                <Input
+                  type="number"
+                  min={1}
+                  max={20}
+                  step={1}
+                  inputMode="numeric"
+                  className="tabular"
+                  value={cameraLimit}
+                  onChange={(e) => setCameraLimit(e.target.value)}
+                />
+              </Field>
+              <dl className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] content-start gap-x-3 gap-y-1 text-sm">
+                <dt className="text-fg-subtle">{t('settingsPage.cameras.active')}</dt>
+                <dd className="tabular text-fg">{cameras.active_live_streams} / {cameras.live_max_streams}</dd>
+                <dt className="text-fg-subtle">{t('settingsPage.cameras.cpu')}</dt>
+                <dd className="tabular text-fg">{cameras.cpu_count}</dd>
+              </dl>
+            </div>
+          )}
+          {camerasError && <Alert tone="danger" closeLabel={closeLabel} onClose={() => setCamerasError('')}>{camerasError}</Alert>}
+          {camerasNotice && <Alert tone="success" closeLabel={closeLabel} onClose={() => setCamerasNotice('')}>{camerasNotice}</Alert>}
+        </CardBody>
+        <CardFooter>
+          <Button
+            onClick={handleSaveCameras}
+            loading={camerasSaving}
+            disabled={!cameras || camerasSaving || !cameraLimitValid || cameraLimitValue === cameras.live_max_streams}
+          >
+            {camerasSaving ? t('settingsPage.cameras.saving') : t('settingsPage.cameras.save')}
           </Button>
         </CardFooter>
       </Card>

@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import Sidebar, { Brand, NavList } from './Sidebar'
+import NotificationBell from './NotificationBell'
 import { Button, Drawer, Icon, LoadingBlock, Menu, SegmentedControl, cn } from './ui'
 
 const LANGS = [
@@ -21,7 +22,6 @@ export function useLanguage() {
   const change = (lng) => {
     i18n.changeLanguage(lng)
     try { localStorage.setItem('lang', lng) } catch { /* private mode */ }
-    document.documentElement.lang = lng === 'kz' ? 'kk' : lng
   }
   return [i18n.language, change]
 }
@@ -35,15 +35,20 @@ function ThemeToggle({ className }) {
 
 function UserMenu() {
   const { t } = useTranslation()
-  const { currentUser, role, logout } = useAuth()
+  const { currentUser, displayName, role, logout } = useAuth()
   const navigate = useNavigate()
-  const initials = (currentUser || '?').replace(/[^\p{L}\p{N}]/gu, '').slice(0, 2).toUpperCase() || '?'
-  const roleLabel = t(`shell.roles.${role || 'staff'}`)
+  // ФИО из учётной записи, если есть; логин — в подсказке и в меню
+  const name = displayName || currentUser
+  const initials = displayName
+    ? displayName.split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]).join('').toUpperCase()
+    : (currentUser || '?').replace(/[^\p{L}\p{N}]/gu, '').slice(0, 2).toUpperCase() || '?'
+  const roleLabel = t(`shell.roles.${role || 'user'}`)
   return (
     <Menu
       header={
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-fg" title={currentUser}>{currentUser || '—'}</p>
+          <p className="truncate text-sm font-semibold text-fg" title={name}>{name || '—'}</p>
+          {displayName && <p className="truncate text-xs text-fg-subtle">{currentUser}</p>}
           <p className="text-xs text-fg-subtle">{roleLabel}</p>
         </div>
       }
@@ -53,7 +58,7 @@ function UserMenu() {
           className="flex min-h-10 min-w-0 cursor-pointer items-center gap-2 rounded-md py-1 pl-1 pr-2 text-left transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
           <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary text-xs font-semibold text-primary-on">{initials}</span>
           <span className="hidden min-w-0 md:block">
-            <span className="block max-w-[12rem] truncate text-sm font-medium leading-5 text-fg" title={currentUser}>{currentUser || '—'}</span>
+            <span className="block max-w-[12rem] truncate text-sm font-medium leading-5 text-fg" title={currentUser}>{name || '—'}</span>
             <span className="block text-xs leading-4 text-fg-subtle">{roleLabel}</span>
           </span>
           <Icon name="chevron-down" size={16} className="hidden text-fg-subtle md:block" />
@@ -64,7 +69,7 @@ function UserMenu() {
 }
 
 export default function Layout() {
-  const { isAuthenticated, authLoading, currentUser, role, logout } = useAuth()
+  const { isAuthenticated, authLoading, currentUser, displayName, role, logout } = useAuth()
   const { t } = useTranslation()
   const [lang, setLang] = useLanguage()
   const location = useLocation()
@@ -73,7 +78,6 @@ export default function Layout() {
   const [collapsed, setCollapsed] = useState(readCollapsed)
 
   useEffect(() => { setMobileOpen(false) }, [location.pathname])
-  useEffect(() => { document.documentElement.lang = lang === 'kz' ? 'kk' : lang }, [lang])
 
   const toggleCollapsed = () => setCollapsed((v) => {
     try { localStorage.setItem('sapa-sidebar-collapsed', v ? '0' : '1') } catch { /* private mode */ }
@@ -81,18 +85,19 @@ export default function Layout() {
   })
 
   if (authLoading) return null
-  if (!isAuthenticated) return <Navigate to="/login" replace />
+  // После входа вернуть на запрошенную страницу (например, отсканированный QR аудитории)
+  if (!isAuthenticated) return <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}` }} />
 
   return (
     <div className="min-h-screen bg-canvas">
       <a href="#main-content"
-        className="fixed left-4 top-4 z-skiplink -translate-y-24 rounded-md bg-primary px-4 py-3 text-sm font-medium text-primary-on shadow-3 transition-transform focus:translate-y-0">
+        className="fixed left-4 top-4 z-skiplink -translate-y-24 rounded-md bg-primary px-4 py-3 text-sm font-medium text-primary-on shadow-3 transition-transform focus:translate-y-0 print:hidden">
         {t('common.skipToContent')}
       </a>
 
       <Sidebar collapsed={collapsed} onToggleCollapse={toggleCollapsed} />
 
-      <div className={cn('flex min-h-screen min-w-0 flex-col transition-[padding] duration-200', collapsed ? 'lg:pl-sidebar-collapsed' : 'lg:pl-sidebar')}>
+      <div className={cn('flex min-h-screen min-w-0 flex-col transition-[padding] duration-200 print:min-h-0 print:pl-0', collapsed ? 'lg:pl-sidebar-collapsed' : 'lg:pl-sidebar')}>
         <header className="sticky top-0 z-header flex h-header shrink-0 items-center gap-3 border-b border-line bg-surface px-4 sm:px-6 print:hidden">
           <Button variant="ghost" iconOnly icon="menu" aria-label={t('shell.openMenu')} onClick={() => setMobileOpen(true)}
             className="-ml-2 lg:hidden" aria-expanded={mobileOpen} aria-controls="mobile-nav" />
@@ -101,12 +106,13 @@ export default function Layout() {
           <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
             <SegmentedControl size="sm" options={LANGS} value={lang} onChange={setLang} ariaLabel={t('shell.language')} className="hidden sm:inline-flex" />
             <ThemeToggle className="hidden sm:inline-flex" />
+            <NotificationBell />
             <UserMenu />
           </div>
         </header>
 
         <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 outline-none">
-          <div className="mx-auto w-full min-w-0 max-w-[96rem] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+          <div className="mx-auto w-full min-w-0 max-w-[96rem] px-4 py-6 sm:px-6 lg:px-8 lg:py-8 print:max-w-none print:p-0">
             <Suspense fallback={<LoadingBlock label={t('ui.loading')} />}>
               <Outlet />
             </Suspense>
@@ -124,8 +130,8 @@ export default function Layout() {
             </div>
             <div className="flex min-w-0 items-center gap-3 rounded-md border border-line p-2">
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-fg" title={currentUser}>{currentUser || '—'}</p>
-                <p className="text-xs text-fg-subtle">{t(`shell.roles.${role || 'staff'}`)}</p>
+                <p className="truncate text-sm font-medium text-fg" title={currentUser}>{displayName || currentUser || '—'}</p>
+                <p className="text-xs text-fg-subtle">{t(`shell.roles.${role || 'user'}`)}</p>
               </div>
               <Button variant="danger-ghost" size="sm" icon="logout" onClick={async () => { await logout(); navigate('/login', { replace: true }) }}>
                 {t('sidebar.logout')}

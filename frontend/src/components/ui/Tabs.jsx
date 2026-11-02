@@ -90,7 +90,7 @@ export function SegmentedControl({ options, value, onChange, ariaLabel, size = '
               active ? 'bg-surface text-fg shadow-1' : 'text-fg-muted hover:text-fg',
             )}>
             {o.icon && <Icon name={o.icon} size={16} />}
-            <span className="min-w-0 [overflow-wrap:anywhere]">{o.label}</span>
+            <span className="min-w-0 hyphens-auto [overflow-wrap:anywhere]">{o.label}</span>
           </button>
         )
       })}

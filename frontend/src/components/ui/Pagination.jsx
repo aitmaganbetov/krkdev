@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { cn } from './cn'
 import Icon from './Icon'
+import { Select } from './Field'
 
 function pageList(page, count) {
   if (count <= 7) return Array.from({ length: count }, (_, i) => i + 1)
@@ -32,10 +33,10 @@ export default function Pagination({ page, pageCount, onPageChange, total, pageS
         {onPageSizeChange && (
           <label className="inline-flex items-center gap-2">
             <span>{t('ui.pagination.perPage')}</span>
-            <select value={pageSize} onChange={(e) => onPageSizeChange(Number(e.target.value))}
-              className="input min-h-9 w-auto py-1 pl-2.5">
-              {pageSizeOptions.map((n) => <option key={n} value={n}>{n}</option>)}
-            </select>
+            {/* Высота 36px — как у кнопок страниц рядом; ширина по содержимому (у полей по умолчанию w-full) */}
+            <Select size="sm" className="min-h-9 !w-auto" value={pageSize}
+              onChange={(e) => onPageSizeChange(Number(e.target.value))}
+              options={pageSizeOptions.map((n) => ({ value: n, label: String(n) }))} />
           </label>
         )}
       </div>

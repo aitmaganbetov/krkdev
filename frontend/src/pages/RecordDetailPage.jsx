@@ -14,6 +14,7 @@ import { isSameIdentity } from '../utils/identity'
 import { formatDateTimeUtcPlus5 } from '../utils/datetime'
 import { applicableSections, findTemplate, localized, scoreTone, templateMaxScore, useRatingTemplates } from '../utils/ratingTemplate'
 import { formatLabel, lessonTypeLabel, templateLang } from '../locales/recordForm'
+import { isRecordAuthor, managesWorkspace } from '../utils/roles'
 
 // Цвет полосы и значения оценки относительно шкалы (пороги — scoreTone)
 const BAR_COLOR = { good: 'bg-success-solid', mid: 'bg-warning-solid', bad: 'bg-danger-solid', none: 'bg-line-strong' }
@@ -56,12 +57,12 @@ export default function RecordDetailPage() {
   const { role, currentUser } = useAuth()
   const isOwner = isSameIdentity(record?.submitted_by, currentUser)
 
-  const canEdit = ((role === 'admin' || role === 'inspector') && record?.status !== 'accepted')
-    || (role === 'staff' && ['draft', 'rework'].includes(record?.status) && isOwner)
-  const canDelete = (role === 'admin' || role === 'inspector') && record?.status !== 'accepted'
-  const canSubmit = role === 'staff' && ['draft', 'rework'].includes(record?.status) && isOwner
-  const canSendToRework = (role === 'admin' || role === 'inspector') && record?.status === 'submitted'
-  const canAccept = (role === 'admin' || role === 'inspector') && ['submitted', 'rework'].includes(record?.status)
+  const canEdit = ((managesWorkspace(role) || role === 'inspector') && record?.status !== 'accepted')
+    || (isRecordAuthor(role) && ['draft', 'rework'].includes(record?.status) && isOwner)
+  const canDelete = (managesWorkspace(role) || role === 'inspector') && record?.status !== 'accepted'
+  const canSubmit = isRecordAuthor(role) && ['draft', 'rework'].includes(record?.status) && isOwner
+  const canSendToRework = (managesWorkspace(role) || role === 'inspector') && record?.status === 'submitted'
+  const canAccept = (managesWorkspace(role) || role === 'inspector') && ['submitted', 'rework'].includes(record?.status)
 
   useEffect(() => {
     getRecord(id)

@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react'
-import { getMe as getMeApi, login as loginApi, logout as logoutApi } from '../services/api'
+import { devLogin as devLoginApi, ecpLogin as ecpLoginApi, getMe as getMeApi, login as loginApi, logout as logoutApi } from '../services/api'
 import { normalizeIdentity } from '../utils/identity'
+import { roleAllowed } from '../utils/roles'
 
 const AuthContext = createContext(null)
 
@@ -12,10 +13,10 @@ function readCachedAuth() {
     localStorage.removeItem('token')
     return {
       currentUser: normalizeIdentity(localStorage.getItem('username') || ''),
-      role: (localStorage.getItem('role') || 'staff').toLowerCase(),
+      role: (localStorage.getItem('role') || 'user').toLowerCase(),
     }
   } catch {
-    return { currentUser: '', role: 'staff' }
+    return { currentUser: '', role: 'user' }
   }
 }
 
@@ -37,10 +38,16 @@ export function AuthProvider({ children }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [currentUser, setCurrentUser] = useState(initial.currentUser)
   const [role, setRole] = useState(initial.role)
+  // Факультет деканата (faculties.FacultyID); у остальных ролей — null
+  const [facultyId, setFacultyId] = useState(null)
+  // ФИО из учётной записи — только для показа (шапка, меню); идентификатор пользователя — currentUser
+  const [displayName, setDisplayName] = useState('')
 
-  const applySession = useCallback((user, nextRole) => {
+  const applySession = useCallback((user, nextRole, nextFacultyId = null, nextDisplayName = '') => {
     setCurrentUser(user)
+    setDisplayName(user ? nextDisplayName || '' : '')
     setRole(nextRole)
+    setFacultyId(nextRole === 'dean' ? nextFacultyId : null)
     setIsAuthenticated(Boolean(user))
     cacheAuth(user, nextRole)
   }, [])
@@ -50,10 +57,10 @@ export function AuthProvider({ children }) {
     getMeApi()
       .then((ctx) => {
         if (!mounted) return
-        applySession(normalizeIdentity(ctx?.username), String(ctx?.role || 'staff').toLowerCase())
+        applySession(normalizeIdentity(ctx?.username), String(ctx?.role || 'user').toLowerCase(), ctx?.faculty_id ?? null, ctx?.display_name)
       })
       .catch(() => {
-        if (mounted) applySession('', 'staff')
+        if (mounted) applySession('', 'user')
       })
       .finally(() => {
         if (mounted) setAuthLoading(false)
@@ -64,34 +71,51 @@ export function AuthProvider({ children }) {
     }
   }, [applySession])
 
-  const login = useCallback(async (username, password) => {
-    const data = await loginApi(username, password)
-    let user = normalizeIdentity(username)
-    let nextRole = String(data?.role || 'staff').toLowerCase()
+  // Сессия после успешного входа: каноническое имя и актуальная роль — из /auth/me
+  const finishLogin = useCallback(async (data, usernameHint) => {
+    let user = normalizeIdentity(usernameHint)
+    let nextRole = String(data?.role || 'user').toLowerCase()
+    let nextFacultyId = null
+    let nextDisplayName = ''
     try {
       // Каноническое имя (например, LDAP-логин без домена) и актуальная роль — из /auth/me.
       const ctx = await getMeApi()
       user = normalizeIdentity(ctx?.username) || user
       nextRole = String(ctx?.role || nextRole).toLowerCase()
+      nextFacultyId = ctx?.faculty_id ?? null
+      nextDisplayName = ctx?.display_name || ''
     } catch { /* остаёмся на данных ответа логина */ }
-    applySession(user, nextRole)
+    applySession(user, nextRole, nextFacultyId, nextDisplayName)
   }, [applySession])
+
+  const login = useCallback(async (username, password) => {
+    await finishLogin(await loginApi(username, password), username)
+  }, [finishLogin])
+
+  // Вход по ЭЦП: CMS с подписанным nonce; имя пользователя — из /auth/me
+  const ecpLogin = useCallback(async (cms) => {
+    await finishLogin(await ecpLoginApi(cms), '')
+  }, [finishLogin])
+
+  // Только dev: быстрый вход под ролью (routers/dev_login.py)
+  const devLogin = useCallback(async (role, facultyId) => {
+    const data = await devLoginApi(role, facultyId)
+    await finishLogin(data, data?.username)
+  }, [finishLogin])
 
   const logout = useCallback(async () => {
     // Сначала просим сервер сбросить cookie, затем чистим локальное состояние.
     try {
       await logoutApi()
     } catch { /* сессия могла уже истечь */ }
-    applySession('', 'staff')
+    applySession('', 'user')
   }, [applySession])
 
-  const hasRole = useCallback((allowedRoles = []) => {
-    const normalized = allowedRoles.map((item) => String(item || '').toLowerCase())
-    return normalized.includes(String(role || '').toLowerCase())
-  }, [role])
+  // Суперадминистратор проходит любую проверку ролей (utils/roles.js)
+  const hasRole = useCallback((allowedRoles = []) => roleAllowed(role, allowedRoles), [role])
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, authLoading, currentUser, role, hasRole, login, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, authLoading, currentUser, displayName, role, facultyId, hasRole, login, ecpLogin, devLogin, logout }}>
       {children}
     </AuthContext.Provider>
   )

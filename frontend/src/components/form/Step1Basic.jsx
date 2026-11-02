@@ -1,14 +1,20 @@
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Alert, Card, Field, FormSection, Input, Select } from '../ui'
+import { Alert, Card, Combobox, Field, FormSection, Input, Select } from '../ui'
+import { localizedName } from '../../utils/locale'
 
 // Пустое ли текстовое поле (та же проверка, что в utils/recordForm.js)
 const isEmpty = (value) => !(typeof value === 'string' && value.trim())
 
 // Шаг 1: основная информация о занятии
 export default function Step1Basic({ data, onChange, catalog, catalogLoading = false, catalogError = '', showErrors = false }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const catalogFaculties = catalog?.faculties ?? []
-  const teacherOptions = catalog?.teachers ?? []
+  // Все преподаватели — список пересобирается только при смене справочника, а не на каждый ввод в форме:
+  // иначе Combobox заново фильтрует его при каждом нажатии клавиши в любом поле
+  const teacherOptions = useMemo(() => (catalog?.teachers ?? []).map((teacher) => (
+    { value: teacher.id, label: teacher.full_name, description: teacher.cafedra || '' }
+  )), [catalog?.teachers])
 
   const selectedFaculty = catalogFaculties.find((faculty) => faculty.name_ru === data.faculty)
   const facultyOptions = selectedFaculty || !data.faculty
@@ -22,7 +28,8 @@ export default function Step1Basic({ data, onChange, catalog, catalogLoading = f
     ? specializationBaseOptions
     : [{ id: `legacy-specialization-${data.op}`, name_ru: data.op, groups: [] }, ...specializationBaseOptions]
 
-  const groupBaseOptions = selectedSpecialization?.groups ?? []
+  // В Platonus у ОП бывают разные группы с одинаковым названием; в записи хранится название — вариант один
+  const groupBaseOptions = [...new Map((selectedSpecialization?.groups ?? []).map((group) => [group.name, group])).values()]
   const groupOptions = groupBaseOptions.some((group) => group.name === data.group_name) || !data.group_name
     ? groupBaseOptions
     : [{ id: `legacy-group-${data.group_name}`, name: data.group_name }, ...groupBaseOptions]
@@ -57,18 +64,14 @@ export default function Step1Basic({ data, onChange, catalog, catalogLoading = f
       <Card padded>
         <FormSection title={t('recordForm.sections.teacherSubject')}>
           <Field label={t('recordForm.fields.teacher')} required error={errorFor('teacher')}>
-            <Input
-              {...field('teacher')}
-              list="teacher-options"
-              autoComplete="off"
+            <Combobox
+              value={data.teacher ?? ''}
+              onChange={(text) => onChange({ teacher: text })}
+              options={teacherOptions}
               placeholder={t('recordForm.fields.teacherPlaceholder')}
+              sheetTitle={t('recordForm.fields.teacher')}
             />
           </Field>
-          <datalist id="teacher-options">
-            {teacherOptions.map((teacher) => (
-              <option key={teacher.id} value={teacher.full_name} />
-            ))}
-          </datalist>
           <Field label={t('recordForm.fields.subject')} required error={errorFor('subject')}>
             <Input {...field('subject')} placeholder={t('steps.subjectPlaceholder')} />
           </Field>
@@ -82,7 +85,7 @@ export default function Step1Basic({ data, onChange, catalog, catalogLoading = f
               value={data.faculty ?? ''}
               onChange={handleFacultyChange}
               placeholder={t('steps.selectFaculty')}
-              options={facultyOptions.map((faculty) => ({ value: faculty.name_ru, label: faculty.name_ru }))}
+              options={facultyOptions.map((faculty) => ({ value: faculty.name_ru, label: localizedName(faculty, 'name', i18n.language) }))}
             />
           </Field>
           <Field label={t('recordForm.fields.op')} required error={errorFor('op')} className="sm:col-span-2">
@@ -93,7 +96,8 @@ export default function Step1Basic({ data, onChange, catalog, catalogLoading = f
               placeholder={data.faculty ? t('steps.selectOp') : t('steps.selectFacultyFirst')}
               options={specializationOptions.map((specialization) => ({
                 value: opValue(specialization),
-                label: opValue(specialization),
+                // Значение — русское (так хранится в записи), подпись — на языке интерфейса
+                label: [specialization.code, localizedName(specialization, 'name', i18n.language)].filter(Boolean).join(' - '),
               }))}
             />
           </Field>

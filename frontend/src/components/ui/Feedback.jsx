@@ -24,7 +24,7 @@ export function Alert({ tone = 'info', title, children, action, className, onClo
       </div>
       {onClose && (
         <button type="button" onClick={onClose} aria-label={close} title={close}
-          className="-m-1 rounded-md p-1 text-fg-subtle hover:bg-surface-hover hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+          className="-m-2 rounded-md p-2 text-fg-subtle hover:bg-surface-hover hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
           <Icon name="x" size={16} />
         </button>
       )}

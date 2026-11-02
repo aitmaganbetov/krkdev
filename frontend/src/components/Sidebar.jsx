@@ -1,40 +1,58 @@
-import { NavLink } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { NavLink, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
 import { SapaMark, SapaWordmark } from './brand/SapaLogo'
 import Icon from './ui/Icon'
 import Tooltip from './ui/Tooltip'
 import { cn } from './ui/cn'
+import { roleAllowed } from '../utils/roles'
+import { getSigningList } from '../services/api'
 
 /*
  * Навигация. Порядок: от ежедневных задач к редким настройкам.
- *  Обзор — дашборд и онлайн-мониторинг (руководство, инспекторы);
- *  Работа — записи (все роли);
+ *  Обзор — дашборд (руководство, инспекторы);
+ *  Работа — документы на подпись ЭЦП (только если они есть у пользователя), записи КРК, взаимопосещение занятий и его график (деканат — только своего факультета),
+ *    ситуационный мониторинг (руководство, инспекторы; члены комитета КРК — только просмотр),
+ *    комитет ректорского контроля (приказ и состав), мои нарушения (сотрудники и пользователи: нарушения,
+ *    зафиксированные на их занятиях);
  *  Администрирование — справочник, пользователи, LDAP, кабинеты и камеры, настройки системы, журнал аудита.
  */
 export const NAV_GROUPS = [
   {
     id: 'overview',
     items: [
-      { to: '/dashboard', labelKey: 'nav.dashboard', icon: 'dashboard', roles: ['admin', 'inspector'] },
-      { to: '/monitoring', labelKey: 'nav.monitoring', icon: 'monitor', roles: ['admin', 'inspector'] },
+      // Дашборд — у всех ролей, каждому только его данные (pages/DashboardPage)
+      { to: '/dashboard', labelKey: 'nav.dashboard', icon: 'dashboard', roles: ['admin', 'dean', 'inspector', 'peer_inspector', 'staff', 'committee', 'user', 'teacher', 'student'] },
     ],
   },
   {
     id: 'workspace',
     items: [
-      { to: '/records', labelKey: 'nav.records', icon: 'records', roles: ['admin', 'inspector', 'staff'] },
+      // signing: виден только подписанту, пока есть документы на подпись (роль не важна)
+      { to: '/signing', labelKey: 'nav.signing', icon: 'key', signing: true },
+      { to: '/schedule', labelKey: 'nav.schedule', icon: 'clock', roles: ['admin', 'inspector', 'peer_inspector', 'staff', 'committee', 'dean'] },
+      { to: '/records', labelKey: 'nav.records', icon: 'records', roles: ['admin', 'inspector', 'staff', 'committee', 'dean'] },
+      // exclude: вложенный раздел со своим пунктом меню не подсвечивает родительский
+      { to: '/peer-visits', labelKey: 'nav.peerVisits', icon: 'user-check', roles: ['admin', 'peer_inspector', 'staff', 'committee', 'dean', 'user', 'teacher'], exclude: '/peer-visits/schedule' },
+      { to: '/peer-visits/schedule', labelKey: 'nav.peerVisitSchedule', icon: 'calendar', roles: ['admin', 'peer_inspector', 'dean'] },
+      { to: '/monitoring', labelKey: 'nav.monitoring', icon: 'monitor', roles: ['admin', 'dean', 'committee'] },
+      { to: '/committee', labelKey: 'nav.committee', icon: 'shield', roles: ['admin', 'inspector', 'dean', 'committee'] },
+      { to: '/my-violations', labelKey: 'nav.myViolations', icon: 'alert', roles: ['staff', 'committee', 'user', 'teacher'] },
+      // only: личный раздел студента — суперадминистратору не показывается
+      { to: '/my-schedule', labelKey: 'nav.mySchedule', icon: 'calendar', roles: ['student'], only: true },
+      { to: '/my-attendance', labelKey: 'nav.myAttendance', icon: 'check-circle', roles: ['student'], only: true },
     ],
   },
   {
     id: 'administration',
     items: [
-      { to: '/catalogs', labelKey: 'nav.catalogs', icon: 'book', roles: ['admin'] },
+      { to: '/catalogs', labelKey: 'nav.catalogs', icon: 'book', roles: ['admin', 'inspector'] },
       { to: '/users', labelKey: 'nav.users', icon: 'users', roles: ['admin'] },
-      { to: '/ldap-users', labelKey: 'nav.ldapUsers', icon: 'directory', roles: ['admin'] },
+      { to: '/ldap-users', labelKey: 'nav.ldapUsers', icon: 'directory', roles: ['superadmin'] },
       { to: '/rooms-settings', labelKey: 'nav.rooms', icon: 'camera', roles: ['admin'] },
-      { to: '/settings', labelKey: 'nav.settings', icon: 'settings', roles: ['admin'] },
-      { to: '/audit-logs', labelKey: 'nav.auditLogs', icon: 'audit', roles: ['admin'] },
+      { to: '/settings', labelKey: 'nav.settings', icon: 'settings', roles: ['superadmin'] },
+      { to: '/audit-logs', labelKey: 'nav.auditLogs', icon: 'audit', roles: ['superadmin'] },
     ],
   },
 ]
@@ -58,10 +76,24 @@ export function Brand({ compact = false }) {
 export function NavList({ collapsed = false, onNavigate }) {
   const { t } = useTranslation()
   const { role } = useAuth()
+  const { pathname } = useLocation()
+  const isExcluded = (item) => Boolean(item.exclude && pathname.startsWith(item.exclude))
+  // Документы на подпись: число перечитывается при переходах в раздел подписания (после подписи пункт исчезает)
+  const [signingCount, setSigningCount] = useState(0)
+  const inSigning = pathname.startsWith('/signing')
+  useEffect(() => {
+    let active = true
+    getSigningList().then((items) => { if (active) setSigningCount(items.length) }).catch(() => {})
+    return () => { active = false }
+  }, [inSigning])
+  const visible = (item) => {
+    if (item.signing) return signingCount > 0 || inSigning
+    return item.only ? item.roles.includes(role) : roleAllowed(role, item.roles)
+  }
   return (
     <nav aria-label={t('sidebar.mainNavigation')} className="flex flex-col gap-5">
       {NAV_GROUPS.map((group) => {
-        const items = group.items.filter((i) => i.roles.includes(role))
+        const items = group.items.filter(visible)
         if (!items.length) return null
         return (
           <div key={group.id} className="flex flex-col gap-0.5">
@@ -81,13 +113,18 @@ export function NavList({ collapsed = false, onNavigate }) {
                     'relative flex min-h-10 min-w-0 items-center gap-3 rounded-md text-sm font-medium transition-colors',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus',
                     collapsed ? 'justify-center px-0' : 'px-3',
-                    isActive
+                    isActive && !isExcluded(item)
                       ? 'bg-primary-subtle text-primary-subtle-fg before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-r-full before:bg-primary'
                       : 'text-fg-muted hover:bg-surface-hover hover:text-fg',
                   )}
                 >
                   <Icon name={item.icon} size={20} />
                   {!collapsed && <span className="min-w-0 flex-1 leading-5">{label}</span>}
+                  {item.signing && signingCount > 0 && (
+                    <span className={cn('rounded-full bg-primary px-1.5 text-xs font-semibold leading-5 text-primary-on tabular', collapsed && 'absolute right-1 top-1 px-1 text-[10px] leading-4')}>
+                      {signingCount}
+                    </span>
+                  )}
                 </NavLink>
               )
               return collapsed ? <Tooltip key={item.to} content={label} placement="right">{link}</Tooltip> : <div key={item.to}>{link}</div>

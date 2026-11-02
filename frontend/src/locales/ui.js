@@ -3,6 +3,13 @@ export default {
   ru: {
     ui: {
       close: 'Закрыть',
+      combobox: {
+        noResults: 'Ничего не найдено',
+        useTyped: 'Указать «{{value}}»',
+        more: 'Показаны первые {{shown}} из {{total}} — уточните поиск',
+        clear: 'Очистить',
+        search: 'Поиск',
+      },
       cancel: 'Отмена',
       confirm: 'Подтвердить',
       confirmTitle: 'Подтвердите действие',
@@ -16,14 +23,9 @@ export default {
         reload: 'Перезагрузить',
       },
       loading: 'Загрузка…',
-      noData: 'Нет данных',
-      nothingFound: 'Ничего не найдено',
       nothingFoundHint: 'Измените условия поиска или фильтры.',
-      loadError: 'Не удалось загрузить данные',
       actions: 'Действия',
       search: 'Поиск',
-      yes: 'Да',
-      no: 'Нет',
       pagination: {
         label: 'Страницы',
         prev: 'Предыдущая страница',
@@ -38,11 +40,10 @@ export default {
       collapseSidebar: 'Свернуть меню',
       expandSidebar: 'Развернуть меню',
       language: 'Язык',
-      theme: 'Тема оформления',
       lightTheme: 'Светлая тема',
       darkTheme: 'Тёмная тема',
       account: 'Учётная запись',
-      roles: { admin: 'Администратор', inspector: 'Инспектор', staff: 'Сотрудник' },
+      roles: { superadmin: 'Суперадминистратор', admin: 'Администратор', inspector: 'Инспектор КРК', peer_inspector: 'Инспектор взаимопосещения', staff: 'Сотрудник', dean: 'Деканат', user: 'Пользователь', teacher: 'Преподаватель' },
     },
     nav: {
       rooms: 'Кабинеты и камеры',
@@ -58,6 +59,13 @@ export default {
   kz: {
     ui: {
       close: 'Жабу',
+      combobox: {
+        noResults: 'Ештеңе табылмады',
+        useTyped: '«{{value}}» көрсету',
+        more: '{{total}} ішінен алғашқы {{shown}} көрсетілді — іздеуді нақтылаңыз',
+        clear: 'Тазалау',
+        search: 'Іздеу',
+      },
       cancel: 'Бас тарту',
       confirm: 'Растау',
       confirmTitle: 'Әрекетті растаңыз',
@@ -71,14 +79,9 @@ export default {
         reload: 'Қайта жүктеу',
       },
       loading: 'Жүктелуде…',
-      noData: 'Деректер жоқ',
-      nothingFound: 'Ештеңе табылмады',
       nothingFoundHint: 'Іздеу шарттарын немесе сүзгілерді өзгертіңіз.',
-      loadError: 'Деректерді жүктеу мүмкін болмады',
       actions: 'Әрекеттер',
       search: 'Іздеу',
-      yes: 'Иә',
-      no: 'Жоқ',
       pagination: {
         label: 'Беттер',
         prev: 'Алдыңғы бет',
@@ -93,11 +96,10 @@ export default {
       collapseSidebar: 'Мәзірді жию',
       expandSidebar: 'Мәзірді жаю',
       language: 'Тіл',
-      theme: 'Безендіру тақырыбы',
       lightTheme: 'Ашық тақырып',
       darkTheme: 'Қараңғы тақырып',
       account: 'Есептік жазба',
-      roles: { admin: 'Әкімші', inspector: 'Инспектор', staff: 'Қызметкер' },
+      roles: { superadmin: 'Суперәкімші', admin: 'Әкімші', inspector: 'РБК инспекторы', peer_inspector: 'Өзара қатысу инспекторы', staff: 'Қызметкер', dean: 'Деканат', user: 'Пайдаланушы', teacher: 'Оқытушы' },
     },
     nav: {
       rooms: 'Кабинеттер мен камералар',
@@ -113,6 +115,13 @@ export default {
   en: {
     ui: {
       close: 'Close',
+      combobox: {
+        noResults: 'Nothing found',
+        useTyped: 'Use “{{value}}”',
+        more: 'Showing the first {{shown}} of {{total}} — refine your search',
+        clear: 'Clear',
+        search: 'Search',
+      },
       cancel: 'Cancel',
       confirm: 'Confirm',
       confirmTitle: 'Please confirm',
@@ -126,14 +135,9 @@ export default {
         reload: 'Reload',
       },
       loading: 'Loading…',
-      noData: 'No data',
-      nothingFound: 'Nothing found',
       nothingFoundHint: 'Try changing your search or filters.',
-      loadError: 'Failed to load data',
       actions: 'Actions',
       search: 'Search',
-      yes: 'Yes',
-      no: 'No',
       pagination: {
         label: 'Pagination',
         prev: 'Previous page',
@@ -148,11 +152,10 @@ export default {
       collapseSidebar: 'Collapse menu',
       expandSidebar: 'Expand menu',
       language: 'Language',
-      theme: 'Theme',
       lightTheme: 'Light theme',
       darkTheme: 'Dark theme',
       account: 'Account',
-      roles: { admin: 'Administrator', inspector: 'Inspector', staff: 'Staff' },
+      roles: { superadmin: 'Super administrator', admin: 'Administrator', inspector: 'Control inspector', peer_inspector: 'Peer visit inspector', staff: 'Staff', dean: 'Dean’s office', user: 'User', teacher: 'Teacher' },
     },
     nav: {
       rooms: 'Rooms & cameras',
@@ -166,9 +169,6 @@ export default {
     },
     // Ключи, которых не было в английском словаре (падали на русский fallback)
     records: {
-      exportExcel: 'Export to Excel',
-      exporting: 'Exporting…',
-      exportError: 'Failed to export records',
       count_few: '{{count}} records',
       count_many: '{{count}} records',
     },

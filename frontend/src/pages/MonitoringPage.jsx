@@ -4,22 +4,35 @@ import { useTranslation } from 'react-i18next'
 import {
   captureRoomPhoto,
   createViolation,
-  getRecords,
   getRooms,
+  getScheduleLessons,
   getViolations,
   improveViolationText,
   recordRoomVideo,
+  justifyViolation,
   reviewViolation,
-  uploadViolationAct,
+  signViolation,
+  syncScheduleFromPlatonus,
   apiErrorText,
 } from '../services/api'
+import useEcpSign from '../hooks/useEcpSign'
 import { toDatetimeLocalUtcPlus5 } from '../utils/datetime'
+import { LESSON_STATUS_TONE, lessonPlace, lessonStatus, nowHHMMUtcPlus5 } from '../utils/scheduleLesson'
+import { violationTypeLabel } from '../utils/violationTypes'
+import { SENT_TO_TEACHER, allowedOutcomes, confirmBlocker, emptyAnswers, isComplete, isLocked, signerOf } from '../utils/videoChecklist'
+import {
+  ChecklistAnswers, ChecklistQuestions, OutcomeBadge, ReportFields, ResponsesList, deviationLabels, emptyReport, formatStamp, reportPayload,
+} from '../components/monitoring/VideoChecklist'
+import { ArchiveStats, ArchiveTable, ObservationsAnalytics, isArchived, observationDate } from '../components/monitoring/ObservationsReports'
 import { useAuth } from '../context/AuthContext'
 import {
-  Alert, Badge, Button, Card, CardBody, CardFooter, CardHeader, DataTable, DescriptionList, EmptyState, Field,
-  FilterBar, Icon, Input, LoadingBlock, Modal, PageHeader, PageStack, Pagination, SearchInput, StatCard, Tabs,
-  Textarea, TruncatedText, cn, useUI,
+  Alert, Badge, Button, Card, CardFooter, Checkbox, DescriptionList, EmptyState, Field,
+  FilterBar, Icon, Input, LoadingBlock, Modal, PageHeader, PageStack, Pagination, RadioGroup, SearchInput, SegmentedControl,
+  StatCard, Tabs, Textarea, TruncatedText, cn, useUI,
 } from '../components/ui'
+import { isAdmin, managesWorkspace } from '../utils/roles'
+import { useVisibleInterval } from '../hooks/useVisibleInterval'
+import { regionLocale } from '../utils/locale'
 
 const tabs = [
   { id: 'live', icon: 'monitor' },
@@ -28,68 +41,25 @@ const tabs = [
   { id: 'analytics', icon: 'chart' },
 ]
 
-// Значения типов нарушений уходят в API как есть (русские строки) — переводится только подпись.
-const VIOLATION_TYPES = [
-  { value: 'Отсутствие', key: 'absence' },
-  { value: 'Опоздание (>15 мин)', key: 'late' },
-  { value: 'Нарушение методики преподавания', key: 'methodology' },
-  { value: 'Отпускает раньше времени', key: 'earlyRelease' },
-  { value: 'Отсутствовали студенты', key: 'noStudents' },
-  { value: 'Нарушение учебной дисциплины', key: 'studyDiscipline' },
-  { value: 'Несвоевременное заполнение LMS', key: 'lms' },
-  { value: 'Нарушение трудовой дисциплины', key: 'laborDiscipline' },
-  { value: 'Ненадлежащий контроль при экзамене', key: 'examControl' },
-  { value: 'Прочее', key: 'other' },
-]
-const DEFAULT_VIOLATION_TYPE = VIOLATION_TYPES[0].value
+// Время занятия по расписанию для карточки наблюдения: «10:00–11:50» (у записи КРК — время начала)
+const lessonTime = (lesson) => (lesson.start_time
+  ? `${lesson.start_time}–${lesson.end_time || ''}`
+  : String(lesson.datetime || '').slice(11, 16))
+const REPORT_OUTCOMES = ['compliant', 'clarification', 'violation', 'technical']
+const sameLogin = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase()
 
-// Подпись типа нарушения на текущем языке; неизвестное значение показываем как есть.
-function violationTypeLabel(t, value) {
-  const found = VIOLATION_TYPES.find((item) => item.value === value)
-  return found ? t(`monitoring.types.${found.key}`) : value
-}
 
-// Локаль для дат и времени: 'kz' — код интерфейса, Intl ожидает 'kk'.
-const DATE_LOCALES = { ru: 'ru-RU', kz: 'kk-KZ', en: 'en-GB' }
-const dateLocale = (lang) => DATE_LOCALES[lang] || 'ru-RU'
 
 // Фон области просмотра медиа: тёмный в обеих темах (единственное допустимое исключение из токенов).
 const MEDIA_BG = 'bg-[rgb(6_18_31)]'
 
-// Демо-занятия (для разработки) — только при VITE_MONITORING_DEMO=true.
-const DEMO_ENABLED = import.meta.env.VITE_MONITORING_DEMO === 'true'
-
 // Сегодняшняя дата (YYYY-MM-DD) в часовом поясе приложения (UTC+5)
 const todayUtcPlus5 = () => toDatetimeLocalUtcPlus5(new Date()).slice(0, 10)
 
-function getDemoLessons(date, databaseRecords, configuredRooms) {
-  const uniqueTeachers = new Set()
-  const sourceRecords = databaseRecords.filter((record) => {
-    const teacher = String(record.teacher || '').trim().toLowerCase()
-    if (!teacher || uniqueTeachers.has(teacher)) return false
-    uniqueTeachers.add(teacher)
-    return true
-  }).slice(0, 6)
-
-  return sourceRecords.map((record, index) => ({
-    ...record,
-    id: `demo-${record.id}`,
-    source_record_id: record.id,
-    room: configuredRooms.length
-      ? configuredRooms[index % configuredRooms.length].name
-      : record.room,
-    configured_room_id: configuredRooms.length
-      ? configuredRooms[index % configuredRooms.length].id
-      : null,
-    datetime: `${date}T${index < 3 ? '15:10' : '16:20'}:00`,
-    status: 'demo',
-    is_demo: true,
-  }))
-}
-
-// Порог низкого балла задаётся в справочнике учебного года (бэкенд отдаёт is_low_score)
-function isLowScore(record) {
-  return record.is_low_score ?? Number(record.score || 0) < 5
+// Начало учебного года (1 сентября) — начало периода «Архива» и «Аналитики» по умолчанию
+const academicYearStart = (day) => {
+  const [year, month] = day.split('-').map(Number)
+  return `${month >= 9 ? year : year - 1}-09-01`
 }
 
 // Строка «иконка — подпись — значение» в карточке занятия
@@ -105,70 +75,65 @@ function LessonFact({ icon, label, children, className }) {
   )
 }
 
-function LessonCard({ record, onOpen }) {
+// Занятие из расписания Platonus
+function ScheduleLessonCard({ lesson, onOpen }) {
   const { t, i18n } = useTranslation()
-  const date = new Date(record.datetime)
-  const initials = String(record.teacher || '?')
+  const kz = i18n.language === 'kz'
+  const subject = (kz && lesson.subject_kz) || lesson.subject
+  const lessonType = (kz && lesson.lesson_type_kz) || lesson.lesson_type
+  const teacher = lesson.teacher || t('monitoring.schedule.noTeacher')
+  const initials = String(lesson.teacher || '?')
     .split(/\s+/)
     .slice(0, 2)
     .map((part) => part[0])
     .join('')
     .toUpperCase()
-  const isProblem = isLowScore(record)
+  const place = lesson.online && !lesson.room
+    ? t('monitoring.schedule.online')
+    : lessonPlace(lesson) || t('monitoring.schedule.noRoom')
 
   return (
-    <Card as="article" className={cn('flex flex-col gap-4 p-4 sm:p-5', isProblem && 'border-danger/40')}>
+    <Card as="article" className={cn('flex flex-col gap-4 p-4 sm:p-5', lesson.status === 'now' && 'border-success/40')}>
       <div className="flex min-w-0 items-start gap-3">
         <span aria-hidden="true" className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary-subtle text-sm font-semibold text-primary-subtle-fg">
           {initials}
         </span>
-        {/* Статус под ФИО, чтобы не отнимать у него ширину */}
         <div className="min-w-0 flex-1">
-          <h3 className="break-words text-base font-semibold text-fg" title={record.teacher}>{record.teacher}</h3>
-          {record.faculty && <TruncatedText lines={2} className="mt-0.5 text-xs text-fg-muted">{record.faculty}</TruncatedText>}
+          <h3 className="break-words text-base font-semibold text-fg" title={teacher}>{teacher}</h3>
+          {lessonType && <p className="mt-0.5 break-words text-xs text-fg-muted">{lessonType}</p>}
           <div className="mt-2 flex flex-wrap gap-1.5">
-            <Badge tone={isProblem ? 'danger' : 'success'} dot>
-              {isProblem ? t('monitoring.lesson.risk') : t('monitoring.lesson.active')}
-            </Badge>
-            {record.is_demo && <Badge tone="warning">{t('monitoring.lesson.demo')}</Badge>}
+            <Badge tone={LESSON_STATUS_TONE[lesson.status]} dot>{t(`monitoring.schedule.status.${lesson.status}`)}</Badge>
+            {lesson.camera_enabled && <Badge tone="primary" icon="camera">{t('monitoring.schedule.camera')}</Badge>}
+            {lesson.online && <Badge tone="neutral" icon="globe">{t('monitoring.schedule.online')}</Badge>}
           </div>
         </div>
       </div>
 
       <div className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-3">
         <LessonFact icon="clock" label={t('monitoring.lesson.time')}>
-          <span className="tabular">{date.toLocaleTimeString(dateLocale(i18n.language), { hour: '2-digit', minute: '2-digit' })}</span>
+          <span className="tabular">{lesson.start_time}–{lesson.end_time}</span>
+          {lesson.pair_number > 0 && <span className="block text-xs font-normal text-fg-muted">{t('monitoring.schedule.pair', { n: lesson.pair_number })}</span>}
         </LessonFact>
         <LessonFact icon="pin" label={t('monitoring.lesson.room')}>
-          <span className="break-words">{record.room || '—'}</span>
+          <span className="break-words">{place}</span>
         </LessonFact>
         <LessonFact icon="book" label={t('monitoring.lesson.subject')} className="col-span-2">
-          <TruncatedText lines={2}>{record.subject}</TruncatedText>
+          <TruncatedText lines={2}>{subject || '—'}</TruncatedText>
         </LessonFact>
-        <LessonFact icon="users" label={t('monitoring.lesson.attendance')} className="col-span-2">
-          <span className="break-words"><span className="tabular">{Number(record.attendance || 0).toFixed(0)}%</span> · {record.group_name}</span>
+        <LessonFact icon="users" label={t('monitoring.schedule.groups')} className="col-span-2">
+          <span className="break-words">
+            {lesson.student_groups || lesson.study_group || '—'}
+            {lesson.students_count > 0 && <span className="font-normal text-fg-muted"> · {t('monitoring.schedule.students', { count: lesson.students_count })}</span>}
+          </span>
         </LessonFact>
       </div>
 
-      <Button block icon="alert" className="mt-auto" onClick={() => onOpen(record)}>
-        {t('monitoring.lesson.report')}
-      </Button>
+      {onOpen && (
+        <Button block icon="eye" className="mt-auto" onClick={() => onOpen(lesson)}>
+          {t('monitoring.lesson.report')}
+        </Button>
+      )}
     </Card>
-  )
-}
-
-// Кнопка загрузки АКТа: скрытый file input + обычная кнопка (доступна с клавиатуры)
-function ActUploadButton({ item, uploading, onUploadAct }) {
-  const { t } = useTranslation()
-  const inputRef = useRef(null)
-  return (
-    <>
-      <input ref={inputRef} type="file" accept="application/pdf,.pdf" className="hidden" disabled={uploading}
-        onChange={(event) => { const file = event.target.files?.[0]; if (file) onUploadAct(item.id, file); event.target.value = '' }} />
-      <Button variant="secondary" icon="upload" loading={uploading} onClick={() => inputRef.current?.click()}>
-        {uploading ? t('monitoring.review.uploadingAct') : item.act_url ? t('monitoring.review.replaceAct') : t('monitoring.review.attachAct')}
-      </Button>
-    </>
   )
 }
 
@@ -192,9 +157,27 @@ function EvidenceThumb({ media, onOpen }) {
   )
 }
 
-const STATUS_TONE = { pending: 'warning', confirmed: 'success', rejected: 'danger' }
+// Раздел «Отчетность» наблюдения (у записей до формы 16-02 — только если что-то заполнено)
+function ReportSummary({ item }) {
+  const { t, i18n } = useTranslation()
+  if (!item.checklist && !item.schedule_check) return null
+  const repeat = item.repeat_observation_at
+    ? new Date(item.repeat_observation_at).toLocaleString(regionLocale(i18n.language), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    : t('checklist.report.notRequired')
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <p className="text-sm font-medium text-fg">{t('checklist.report.title')}</p>
+      <DescriptionList items={[
+        { label: t('checklist.report.scheduleCheck'), value: item.schedule_check || '—', full: true },
+        { label: t('checklist.report.repeat'), value: <span className="tabular">{repeat}</span> },
+        { label: t('checklist.report.onsite'), value: item.onsite_verification || t('checklist.report.notRequired') },
+        { label: t('checklist.report.ticket'), value: item.tech_ticket || t('checklist.report.none') },
+      ]} />
+    </div>
+  )
+}
 
-function ViolationsReview({ items, role, onReview, onUploadAct, uploadingActId, loading, error, onRetry }) {
+function ViolationsReview({ items, role, currentUser, onReport, onSign, signingId, onJustify, loading, error, onRetry }) {
   const { t, i18n } = useTranslation()
   const [previewImage, setPreviewImage] = useState('')
   const [previewVideo, setPreviewVideo] = useState('')
@@ -220,36 +203,59 @@ function ViolationsReview({ items, role, onReview, onUploadAct, uploadingActId, 
   return (
     <div className="flex min-w-0 flex-col gap-4">
       {items.map((item) => {
-        const status = STATUS_TONE[item.status] ? item.status : 'pending'
+        const labels = deviationLabels(t, item)
+        const summary = item.checklist
+          ? (labels.length ? labels.join(' · ') : t('checklist.short.none'))
+          : violationTypeLabel(t, item.violation_type)
+        const window = [item.observed_from, item.observed_to].filter(Boolean).join('–')
         return (
           <Card as="article" key={item.id}>
             <div className="grid min-w-0 gap-5 p-4 sm:p-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
               <div className="flex min-w-0 flex-col gap-4">
                 <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-3 gap-y-2">
                   <div className="min-w-0 flex-1 basis-56">
-                    <p className="break-words text-sm font-medium text-accent">{violationTypeLabel(t, item.violation_type)}</p>
+                    <p className="break-words text-sm font-medium text-accent">{summary}</p>
                     <h3 className="mt-0.5 break-words text-lg font-semibold text-fg">{item.teacher}</h3>
                   </div>
-                  <Badge tone={STATUS_TONE[status]} dot>{t(`monitoring.review.status.${status}`)}</Badge>
+                  <OutcomeBadge status={item.status} />
                 </div>
                 <DescriptionList items={[
                   { label: t('monitoring.review.room'), value: item.room || '—' },
-                  { label: t('monitoring.review.date'), value: <span className="tabular">{new Date(`${item.violation_date}T00:00:00`).toLocaleDateString(dateLocale(i18n.language))}</span> },
-                  { label: t('monitoring.review.subject'), value: item.subject || '—', full: true },
-                ]} />
+                  { label: t('monitoring.review.date'), value: <span className="tabular">{new Date(`${item.violation_date}T00:00:00`).toLocaleDateString(regionLocale(i18n.language))}</span> },
+                  item.checklist && { label: t('checklist.card.window'), value: <span className="tabular">{window || '—'}</span> },
+                  item.checklist && { label: t('checklist.card.camera'), value: item.camera || '—' },
+                  { label: t('checklist.card.subject'), value: [item.subject, item.group_name].filter(Boolean).join(' · ') || '—', full: true },
+                ].filter(Boolean)} />
+                {item.checklist ? (
+                  <details className="min-w-0">
+                    <summary className="cursor-pointer text-sm font-medium text-primary">{t('checklist.questionsTitle')}</summary>
+                    <div className="mt-2"><ChecklistAnswers checklist={item.checklist} /></div>
+                  </details>
+                ) : (
+                  <p className="text-xs text-fg-subtle">{t('checklist.legacy')}</p>
+                )}
                 {item.description && <p className="whitespace-pre-line rounded-md bg-surface-muted p-3 text-sm text-fg-muted">{item.description}</p>}
+                <ReportSummary item={item} />
+                <ResponsesList responses={item.responses} />
                 <div className="flex min-w-0 flex-col gap-1 text-xs text-fg-subtle">
-                  <p className="break-words">{t('monitoring.review.createdBy', { name: item.created_by })}</p>
+                  <p className="break-words">{t('checklist.observedBy', { name: item.created_by_name || item.created_by })}</p>
                   {item.reviewed_by && (
                     <p className="break-words">
-                      {t('monitoring.review.reviewedBy', { name: item.reviewed_by })}{item.review_comment ? ` · ${item.review_comment}` : ''}
+                      {t('checklist.reviewedBy', { name: item.reviewed_by_name || item.reviewed_by })}{item.review_comment ? ` · ${item.review_comment}` : ''}
                     </p>
                   )}
+                  {item.signed_at && item.signature_info && (
+                    <p className="flex min-w-0 items-start gap-1 break-words font-medium text-success">
+                      <Icon name="key" size={14} className="mt-0.5 shrink-0" />
+                      {t('checklist.signedBy', { subject: item.signature_info.subject, date: formatStamp(item.signed_at, i18n.language) })}
+                    </p>
+                  )}
+                  {item.sign_data && <p className="break-words font-medium text-danger">{t('checklist.awaitingSign', { name: signerOf(item) })}</p>}
                 </div>
                 {item.act_url && (
                   <div className="flex flex-wrap gap-2">
                     <Button as="a" href={item.act_url} target="_blank" rel="noreferrer" variant="secondary" size="sm" icon="file-text">
-                      {t('monitoring.review.openAct')}
+                      {item.checklist ? t('checklist.openForm') : t('monitoring.review.openAct')}
                     </Button>
                   </div>
                 )}
@@ -272,16 +278,20 @@ function ViolationsReview({ items, role, onReview, onUploadAct, uploadingActId, 
                 )}
               </div>
             </div>
-            {role === 'admin' && item.status === 'pending' && (
+            {managesWorkspace(role) && (!isLocked(item) || (item.status === 'confirmed' && item.responses?.length > 0)) && (
               <CardFooter>
-                {!item.act_url && <p className="min-w-0 flex-1 basis-56 text-xs text-fg-subtle">{t('monitoring.review.actRequired')}</p>}
-                <ActUploadButton item={item} uploading={uploadingActId === item.id} onUploadAct={onUploadAct} />
-                <Button variant="danger" icon="x" onClick={() => onReview(item.id, 'rejected')}>{t('monitoring.review.reject')}</Button>
-                <Button variant="success" icon="check" disabled={!item.act_url}
-                  title={!item.act_url ? t('monitoring.review.actRequired') : undefined}
-                  onClick={() => onReview(item.id, 'confirmed')}>
-                  {t('monitoring.review.confirm')}
-                </Button>
+                {!isLocked(item) && (
+                  <Button variant="secondary" icon="edit" onClick={() => onReport(item)}>{t('checklist.reportButton')}</Button>
+                )}
+                {/* Подписывает наблюдатель (сервер сверяет ИИН сертификата); «соответствует» и нарушение уходят преподавателю */}
+                {item.sign_data && sameLogin(signerOf(item), currentUser) && (
+                  <Button icon="key" loading={signingId === item.id} disabled={Boolean(signingId)} onClick={() => onSign(item)}>
+                    {signingId === item.id ? t('checklist.signing') : t(SENT_TO_TEACHER.includes(item.status) ? 'checklist.signAndSend' : 'checklist.sign')}
+                  </Button>
+                )}
+                {item.status === 'confirmed' && item.responses?.length > 0 && (
+                  <Button variant="secondary" icon="check" onClick={() => onJustify(item)}>{t('checklist.justify')}</Button>
+                )}
               </CardFooter>
             )}
           </Card>
@@ -341,21 +351,29 @@ function ViolationsReview({ items, role, onReview, onUploadAct, uploadingActId, 
 export default function MonitoringPage() {
   const { t, i18n } = useTranslation()
   const { toast } = useUI()
-  const { role } = useAuth()
-  const [records, setRecords] = useState([])
+  const { role, currentUser } = useAuth()
+  // Член комитета КРК смотрит мониторинг, но нарушения не фиксирует (POST /violations ему закрыт)
+  const canReport = role !== 'committee'
   const [rooms, setRooms] = useState([])
   const [violations, setViolations] = useState([])
   const [violationsLoading, setViolationsLoading] = useState(true)
   const [violationsError, setViolationsError] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
   const [tab, setTab] = useState('live')
   const [date, setDate] = useState(todayUtcPlus5)
+  // Период «Архива» и «Аналитики» (по дате наблюдения): с начала учебного года по сегодня
+  const [periodFrom, setPeriodFrom] = useState(() => academicYearStart(todayUtcPlus5()))
+  const [periodTo, setPeriodTo] = useState(todayUtcPlus5)
   const [teacher, setTeacher] = useState('')
   const [room, setRoom] = useState('')
   const [selectedLesson, setSelectedLesson] = useState(null)
-  const [violationType, setViolationType] = useState(DEFAULT_VIOLATION_TYPE)
+  // Чек-лист 16-02: дата и фактическое окно наблюдения, ответы, итог, отчетность, комментарий
   const [violationDate, setViolationDate] = useState(todayUtcPlus5)
+  const [observedFrom, setObservedFrom] = useState('')
+  const [observedTo, setObservedTo] = useState('')
+  const [answers, setAnswers] = useState(emptyAnswers)
+  const [answersInvalid, setAnswersInvalid] = useState(false)
+  const [outcome, setOutcome] = useState('compliant')
+  const [newReport, setNewReport] = useState(() => emptyReport())
   const [violationDescription, setViolationDescription] = useState('')
   const [savingViolation, setSavingViolation] = useState(false)
   // Сообщение внутри формы фиксации: { tone, text }
@@ -363,37 +381,42 @@ export default function MonitoringPage() {
   const [evidence, setEvidence] = useState([])
   const [capturing, setCapturing] = useState('')
   const [videoExpanded, setVideoExpanded] = useState(false)
-  const [uploadingActId, setUploadingActId] = useState(null)
   const [improvingText, setImprovingText] = useState(false)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
-  // Диалог проверки нарушения (комментарий администратора): { id, status }
-  const [reviewTarget, setReviewTarget] = useState(null)
-  const [reviewComment, setReviewComment] = useState('')
-  const [reviewing, setReviewing] = useState(false)
-
-  const loadRecords = () => {
-    setLoading(true)
-    setError('')
-    getRecords({ skip: 0, limit: 200 })
-      .then(async (data) => {
-        const firstItems = data.items || []
-        const remainingRequests = []
-        for (let skip = firstItems.length; skip < Number(data.total || 0); skip += 200) {
-          remainingRequests.push(getRecords({ skip, limit: 200 }))
-        }
-        const remaining = await Promise.all(remainingRequests)
-        setRecords([...firstItems, ...remaining.flatMap((result) => result.items || [])])
-      })
-      .catch(() => setError(t('monitoring.loadError')))
-      .finally(() => setLoading(false))
-  }
-
-  useEffect(() => { loadRecords() }, [])
-
+  // Диалог «Отчетность и статус» по наблюдению (деканат, администратор)
+  const [reportTarget, setReportTarget] = useState(null)
+  const [reportStatus, setReportStatus] = useState('clarification')
+  const [report, setReport] = useState(() => emptyReport())
+  const [reportComment, setReportComment] = useState('')
+  const [reportError, setReportError] = useState('')
+  const [reporting, setReporting] = useState(false)
+  // Подпись нарушения ЭЦП и снятие нарушения по пояснению преподавателя
+  const { sign, error: signError, setError: setSignError } = useEcpSign()
+  const [signingId, setSigningId] = useState(null)
+  const [justifyTarget, setJustifyTarget] = useState(null)
+  const [justifyComment, setJustifyComment] = useState('')
+  const [justifying, setJustifying] = useState(false)
+  // Вкладка «Онлайн»: занятия по расписанию Platonus на выбранную дату
+  const [schedule, setSchedule] = useState(null)
+  const [scheduleLoading, setScheduleLoading] = useState(true)
+  const [scheduleError, setScheduleError] = useState('')
+  const [liveMode, setLiveMode] = useState('now')
+  const [cameraOnly, setCameraOnly] = useState(false)
+  const [syncingSchedule, setSyncingSchedule] = useState(false)
+  const [clock, setClock] = useState(nowHHMMUtcPlus5)
+  const scheduleRequest = useRef(0)
+  // Сообщение формы — вверху длинного окна: прокручиваем к нему, чтобы его было видно при нажатии «Сохранить»
+  const noticeRef = useRef(null)
   useEffect(() => {
+    if (violationNotice || reportError) noticeRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [violationNotice, reportError])
+
+  // Список кабинетов открыт только администратору (GET /rooms) — остальным он не нужен и вернул бы 403
+  useEffect(() => {
+    if (!isAdmin(role)) return
     getRooms().then((data) => setRooms(data || [])).catch(() => setRooms([]))
-  }, [])
+  }, [role])
 
   const loadViolations = () => {
     setViolationsLoading(true)
@@ -405,19 +428,73 @@ export default function MonitoringPage() {
 
   useEffect(() => loadViolations(), [])
 
+  const loadSchedule = (silent = false) => {
+    // Ответ на устаревшую дату (её успели переключить) не должен перезаписать текущий
+    const request = ++scheduleRequest.current
+    if (!silent) setScheduleLoading(true)
+    getScheduleLessons(date)
+      .then((data) => {
+        if (request !== scheduleRequest.current) return
+        setSchedule(data && !Array.isArray(data) ? data : null)
+        setScheduleError('')
+      })
+      .catch(() => {
+        if (request !== scheduleRequest.current) return
+        if (!silent) setSchedule(null)
+        setScheduleError(t('monitoring.schedule.loadError'))
+      })
+      .finally(() => { if (request === scheduleRequest.current) setScheduleLoading(false) })
+  }
+
+  useEffect(() => { loadSchedule() }, [date])
+
+  // Пока открыт сегодняшний день, статусы пересчитываются по часам, а расписание подтягивается заново
+  // В скрытой вкладке часы и обновление расписания стоят; при возврате — сразу, если подошёл срок
+  const viewingToday = date === todayUtcPlus5()
+  useEffect(() => {
+    if (viewingToday) setClock(nowHHMMUtcPlus5())
+  }, [viewingToday])
+  useVisibleInterval(() => setClock(nowHHMMUtcPlus5()), 30_000, { enabled: viewingToday })
+  useVisibleInterval(() => loadSchedule(true), 5 * 60_000, { enabled: viewingToday })
+
+  const syncSchedule = async () => {
+    setSyncingSchedule(true)
+    try {
+      const result = await syncScheduleFromPlatonus()
+      toast.success(t('monitoring.schedule.syncDone', { count: result.lessons }))
+      loadSchedule(true)
+    } catch (err) {
+      toast.error(apiErrorText(err, t('monitoring.schedule.syncError')))
+    } finally {
+      setSyncingSchedule(false)
+    }
+  }
+
   const selectedCameraRoom = useMemo(() => {
     if (!selectedLesson) return null
-    if (selectedLesson.configured_room_id) {
-      return rooms.find((item) => item.id === selectedLesson.configured_room_id && item.camera_enabled) || null
+    // Занятие расписания уже знает свой кабинет: список кабинетов (только для админа) не нужен
+    if ('room_id' in selectedLesson) {
+      return selectedLesson.room_id && selectedLesson.camera_enabled
+        ? { id: selectedLesson.room_id, name: selectedLesson.room }
+        : null
     }
     const lessonRoom = String(selectedLesson.room || '').toLowerCase()
     return rooms.find((item) => lessonRoom.includes(String(item.name || '').toLowerCase()) && item.camera_enabled) || null
   }, [rooms, selectedLesson])
 
+  // Итог первого наблюдения — только из допустимых по ответам (п. 4.5, 4.7)
+  const outcomeOptions = allowedOutcomes(answers)
+  const effectiveOutcome = outcomeOptions.includes(outcome) ? outcome : outcomeOptions[0]
+
   const openViolation = (lesson) => {
     setSelectedLesson(lesson)
-    setViolationType(DEFAULT_VIOLATION_TYPE)
     setViolationDate(String(lesson.datetime || date).slice(0, 10))
+    setObservedFrom(nowHHMMUtcPlus5())
+    setObservedTo('')
+    setAnswers(emptyAnswers())
+    setAnswersInvalid(false)
+    setOutcome('compliant')
+    setNewReport(emptyReport())
     setViolationDescription('')
     setViolationNotice(null)
     setEvidence([])
@@ -464,89 +541,145 @@ export default function MonitoringPage() {
     }
   }
 
-  const saveViolation = async (event) => {
-    event.preventDefault()
-    if (!selectedLesson || !violationType) return
+  // signAfter — сразу подписать ЭЦП (и отправить преподавателю); без подписи чек-лист можно подписать позже из списка
+  const saveViolation = async (event, signAfter = true) => {
+    event?.preventDefault()
+    if (!selectedLesson) return
+    if (!isComplete(answers)) {
+      setAnswersInvalid(true)
+      setViolationNotice({ tone: 'warning', text: t('checklist.needAnswers') })
+      return
+    }
+    if (answers.other === 'yes' && !violationDescription.trim()) {
+      setViolationNotice({ tone: 'warning', text: t('checklist.needComment') })
+      return
+    }
     setSavingViolation(true)
     setViolationNotice(null)
+    let created = null
     try {
-      await createViolation({
-        // Демо-занятия бывают только при VITE_MONITORING_DEMO (dev); id вида demo-<id> явно помечает такую ссылку
+      created = await createViolation({
+        // Занятие расписания: schedule-<lessonID Platonus>-<дата>; запись КРК — её id
         lesson_ref: String(selectedLesson.id),
-        teacher: selectedLesson.teacher,
-        room: selectedLesson.room || '',
-        subject: selectedLesson.subject || '',
-        violation_type: violationType,
+        teacher: selectedLesson.teacher || t('monitoring.schedule.noTeacher'),
+        room: lessonPlace(selectedLesson).slice(0, 255),
+        subject: String(selectedLesson.subject || '').slice(0, 255),
+        group_name: String(selectedLesson.student_groups || selectedLesson.study_group || selectedLesson.group_name || '').slice(0, 500),
+        camera: selectedCameraRoom ? String(selectedCameraRoom.name).slice(0, 255) : '',
+        scheduled_time: lessonTime(selectedLesson),
+        observed_from: observedFrom,
+        // Окончание окна — момент сохранения, если не указано
+        observed_to: observedTo || nowHHMMUtcPlus5(),
         violation_date: violationDate,
+        checklist: answers,
+        status: effectiveOutcome,
         description: violationDescription,
+        ...reportPayload(newReport),
         evidence_ids: evidence.map((item) => item.id),
       })
       setSelectedLesson(null)
-      toast.success(t('monitoring.form.saved'))
       loadViolations()
       setTab('violations')
     } catch (err) {
-      setViolationNotice({ tone: 'danger', text: apiErrorText(err, t('monitoring.form.saveError')) })
+      setViolationNotice({ tone: 'danger', text: apiErrorText(err, t('checklist.createError')) })
     } finally {
       setSavingViolation(false)
     }
-  }
-
-  // Вместо window.prompt — диалог с необязательным комментарием
-  const handleReview = (violationId, status) => {
-    setReviewComment('')
-    setReviewTarget({ id: violationId, status })
-  }
-
-  const submitReview = async (event) => {
-    event.preventDefault()
-    if (!reviewTarget) return
-    setReviewing(true)
-    try {
-      await reviewViolation(reviewTarget.id, reviewTarget.status, reviewComment)
-      toast.success(t(reviewTarget.status === 'confirmed' ? 'monitoring.review.confirmed' : 'monitoring.review.rejected'))
-      setReviewTarget(null)
-      loadViolations()
-    } catch (err) {
-      toast.error(apiErrorText(err, t('monitoring.review.reviewError')))
-    } finally {
-      setReviewing(false)
+    if (!created) return
+    // Закрыли окно NCALayer — подписать можно позже из списка
+    if (signAfter && created.sign_data) {
+      if (!await signItem(created)) toast.warning(t('checklist.signLater'))
+    } else {
+      toast.success(t('checklist.created'))
     }
   }
 
-  const handleUploadAct = async (violationId, file) => {
-    if (!file.name.toLowerCase().endsWith('.pdf') || (file.type && file.type !== 'application/pdf')) {
-      toast.error(t('monitoring.review.actPdfOnly'))
+  const signItem = async (item) => {
+    setSigningId(item.id)
+    const signed = await sign(item.sign_data, (cms) => signViolation(item.id, cms), (saved) => {
+      if (saved.status === 'confirmed') return t(saved.teacher_notified ? 'checklist.signedNotified' : 'checklist.signedNotNotified')
+      if (saved.status === 'compliant') return t(saved.teacher_notified ? 'checklist.sentCompliant' : 'checklist.signedNotNotified')
+      return t('checklist.signedOnly')
+    })
+    setSigningId(null)
+    loadViolations()
+    return signed
+  }
+
+  const submitJustify = async (event) => {
+    event.preventDefault()
+    setJustifying(true)
+    try {
+      await justifyViolation(justifyTarget.id, justifyComment.trim())
+      toast.success(t('checklist.justified'))
+      setJustifyTarget(null)
+      loadViolations()
+    } catch (err) {
+      toast.error(apiErrorText(err, t('checklist.justifyError')))
+    } finally {
+      setJustifying(false)
+    }
+  }
+
+  const openReport = (item) => {
+    setReportTarget(item)
+    setReportStatus(item.status === 'pending' ? 'clarification' : item.status)
+    setReport(emptyReport(item))
+    setReportComment('')
+    setReportError('')
+  }
+
+  const submitReport = async (event) => {
+    event.preventDefault()
+    if (!reportTarget) return
+    // Те же правила, что на сервере: подтверждение — после проверок (п. 4.5), плохой сигнал — не против преподавателя (п. 4.7)
+    const blocker = reportStatus === 'violation' && reportTarget.status !== 'violation'
+      ? confirmBlocker(reportTarget, report)
+      : reportStatus === 'compliant' && reportTarget.checklist?.quality === 'no' ? 'technicalOnly' : null
+    if (blocker) {
+      setReportError(t(`checklist.${blocker}`))
       return
     }
-    setUploadingActId(violationId)
+    setReporting(true)
+    setReportError('')
+    let saved = null
     try {
-      await uploadViolationAct(violationId, file)
-      toast.success(t('monitoring.review.actUploaded'))
+      saved = await reviewViolation(reportTarget.id, { status: reportStatus, comment: reportComment, ...reportPayload(report) })
+      setReportTarget(null)
       loadViolations()
     } catch (err) {
-      toast.error(apiErrorText(err, t('monitoring.review.actUploadError')))
+      setReportError(apiErrorText(err, t('checklist.saveError')))
     } finally {
-      setUploadingActId(null)
+      setReporting(false)
+    }
+    if (!saved) return
+    // Нарушение после уточнения тоже подписывается ЭЦП тем, кто его зафиксировал
+    if (saved.status === 'violation' && saved.sign_data) {
+      if (!await signItem(saved)) toast.warning(t('checklist.signLater'))
+    } else {
+      toast.success(t('checklist.saved'))
     }
   }
 
-  const filtered = useMemo(() => {
+  const today = todayUtcPlus5()
+  const isToday = date === today
+  // «Идут сейчас» имеет смысл только для сегодняшней даты
+  const effectiveMode = isToday ? liveMode : 'day'
+
+  const scheduleLessons = useMemo(() => {
     const queryTeacher = teacher.trim().toLowerCase()
     const queryRoom = room.trim().toLowerCase()
-    // Демо-занятия добавляются только во вкладку «Онлайн» (с фильтром по дате)
-    const recordsWithDemo = DEMO_ENABLED && tab === 'live'
-      ? [...getDemoLessons(date, records, rooms), ...records]
-      : records
-    return recordsWithDemo.filter((record) => {
-      const recordDate = String(record.datetime || '').slice(0, 10)
-      const matchesDate = tab === 'archive' || tab === 'analytics' || recordDate === date
-      const matchesTab = tab !== 'violations' || isLowScore(record)
-      return matchesDate && matchesTab
-        && String(record.teacher || '').toLowerCase().includes(queryTeacher)
-        && String(record.room || '').toLowerCase().includes(queryRoom)
-    })
-  }, [records, rooms, date, teacher, room, tab])
+    return (schedule?.lessons || [])
+      .map((lesson) => ({ ...lesson, status: lessonStatus(lesson, today, clock), datetime: `${lesson.date}T${lesson.start_time}:00` }))
+      .filter((lesson) => String(lesson.teacher || '').toLowerCase().includes(queryTeacher)
+        && `${lesson.room || ''} ${lesson.building || ''}`.toLowerCase().includes(queryRoom))
+  }, [schedule, today, clock, teacher, room])
+
+  const liveLessons = useMemo(() => scheduleLessons.filter((lesson) => (
+    (effectiveMode === 'day' || lesson.status === 'now') && (!cameraOnly || lesson.camera_enabled)
+  )), [scheduleLessons, effectiveMode, cameraOnly])
+
+  const lessonsNow = scheduleLessons.filter((lesson) => lesson.status === 'now')
 
   const filteredViolations = useMemo(() => {
     const queryTeacher = teacher.trim().toLowerCase()
@@ -557,48 +690,40 @@ export default function MonitoringPage() {
     ))
   }, [violations, teacher, room])
 
-  const paginationItems = tab === 'violations' ? filteredViolations : filtered
+  // «Архив» и «Аналитика» — наблюдения за период по дате наблюдения; в архиве — с принятым решением
+  const periodViolations = useMemo(() => filteredViolations.filter((item) => {
+    const day = observationDate(item)
+    return (!periodFrom || day >= periodFrom) && (!periodTo || day <= periodTo)
+  }), [filteredViolations, periodFrom, periodTo])
+  const archiveItems = useMemo(() => periodViolations.filter(isArchived)
+    .sort((a, b) => observationDate(b).localeCompare(observationDate(a)) || b.id - a.id), [periodViolations])
+  const usesPeriod = tab === 'archive' || tab === 'analytics'
+
+  const paginationItems = tab === 'violations' ? filteredViolations : tab === 'live' ? liveLessons : tab === 'archive' ? archiveItems : []
   const pageCount = Math.max(1, Math.ceil(paginationItems.length / pageSize))
   const safePage = Math.min(page, pageCount)
   const paginatedItems = paginationItems.slice((safePage - 1) * pageSize, safePage * pageSize)
 
   useEffect(() => {
     setPage(1)
-  }, [tab, date, teacher, room, pageSize])
+  }, [tab, date, periodFrom, periodTo, teacher, room, pageSize, liveMode, cameraOnly])
 
-  // Демо-занятия не участвуют в статистике
-  const realFiltered = filtered.filter((record) => !record.is_demo)
-  const problemCount = realFiltered.filter((record) => isLowScore(record)).length
-  const avgAttendance = realFiltered.length
-    ? realFiltered.reduce((sum, record) => sum + Number(record.attendance || 0), 0) / realFiltered.length
-    : 0
-  const avgScore = realFiltered.length
-    ? realFiltered.reduce((sum, record) => sum + Number(record.score || 0), 0) / realFiltered.length
-    : 0
+  // Показатели вкладки «Наблюдения» — по итогам чек-листа ситуационного видеомониторинга (те же фильтры, что у списка)
+  const observationStats = useMemo(() => {
+    const count = (...statuses) => filteredViolations.filter((item) => statuses.includes(item.status)).length
+    return {
+      total: filteredViolations.length,
+      compliant: count('compliant'),
+      clarification: count('clarification'),
+      technical: count('technical'),
+      violations: count('violation', 'confirmed'),
+      signed: count('confirmed'),
+      justified: count('justified'),
+      unsigned: filteredViolations.filter((item) => REPORT_OUTCOMES.includes(item.status) && !item.signed_at).length,
+    }
+  }, [filteredViolations])
 
   const tabItems = tabs.map((item) => ({ value: item.id, icon: item.icon, label: t(`monitoring.tabs.${item.id}`) }))
-
-  const analyticsColumns = [
-    { key: 'teacher', header: t('monitoring.analytics.colTeacher'), mobile: 'title', minWidth: '12rem',
-      cell: (record) => <span className="font-medium">{record.teacher}</span> },
-    { key: 'subject', header: t('monitoring.analytics.colSubject'), minWidth: '14rem',
-      cell: (record) => <span className="text-fg-muted">{record.subject}</span> },
-    { key: 'room', header: t('monitoring.analytics.colRoom'), cell: (record) => <span className="text-fg-muted">{record.room || '—'}</span> },
-    { key: 'score', header: t('monitoring.analytics.colScore'), align: 'right', nowrap: true,
-      cell: (record) => (
-        <span className={cn('font-semibold tabular', isLowScore(record) ? 'text-danger' : 'text-success')}>
-          {Number(record.score || 0).toFixed(1)}
-        </span>
-      ) },
-    { key: 'attendance', header: t('monitoring.analytics.colAttendance'), align: 'right', nowrap: true,
-      cell: (record) => <span className="tabular text-fg-muted">{Number(record.attendance || 0).toFixed(0)}%</span> },
-  ]
-
-  const listTitle = tab === 'violations'
-    ? t('monitoring.list.violations')
-    : tab === 'archive' ? t('monitoring.list.archive') : t('monitoring.list.live')
-
-  const reviewConfirming = reviewTarget?.status === 'confirmed'
 
   return (
     <PageStack>
@@ -607,9 +732,20 @@ export default function MonitoringPage() {
       <Tabs items={tabItems} value={tab} onChange={setTab} ariaLabel={t('monitoring.tabs.label')} />
 
       <FilterBar>
-        <Field label={t('monitoring.filters.date')}>
-          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        </Field>
+        {usesPeriod ? (
+          <>
+            <Field label={t('monitoring.filters.periodFrom')}>
+              <Input type="date" value={periodFrom} max={periodTo || undefined} onChange={(e) => setPeriodFrom(e.target.value)} />
+            </Field>
+            <Field label={t('monitoring.filters.periodTo')}>
+              <Input type="date" value={periodTo} min={periodFrom || undefined} onChange={(e) => setPeriodTo(e.target.value)} />
+            </Field>
+          </>
+        ) : (
+          <Field label={t('monitoring.filters.date')}>
+            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </Field>
+        )}
         <Field label={t('monitoring.filters.room')}>
           <SearchInput value={room} onChange={(e) => setRoom(e.target.value)} placeholder={t('monitoring.filters.roomPlaceholder')} />
         </Field>
@@ -618,81 +754,119 @@ export default function MonitoringPage() {
         </Field>
       </FilterBar>
 
-      <section className="grid min-w-0 grid-cols-2 gap-4 xl:grid-cols-4">
-        <StatCard label={t('monitoring.metrics.lessons')} value={realFiltered.length} tone="primary" />
-        <StatCard label={t('monitoring.metrics.avgScore')} value={avgScore.toFixed(1)} tone="success" />
-        <StatCard label={t('monitoring.metrics.attendance')} value={`${avgAttendance.toFixed(0)}%`} tone="warning" />
-        <StatCard label={t('monitoring.metrics.violations')} value={problemCount} tone="danger" />
-      </section>
+      {tab === 'live' ? (
+        <section className="grid min-w-0 grid-cols-2 gap-4 xl:grid-cols-4">
+          <StatCard label={t('monitoring.schedule.metrics.now')} value={isToday ? lessonsNow.length : '—'} tone="success" />
+          <StatCard label={t('monitoring.schedule.metrics.day')} value={scheduleLessons.length} tone="primary" />
+          <StatCard label={t('monitoring.schedule.metrics.camera')} value={isToday ? lessonsNow.filter((lesson) => lesson.camera_enabled).length : '—'} />
+          <StatCard label={t('monitoring.schedule.metrics.online')} value={isToday ? lessonsNow.filter((lesson) => lesson.online).length : '—'} />
+        </section>
+      ) : tab === 'violations' ? (
+        <section className="grid min-w-0 grid-cols-2 gap-4 xl:grid-cols-4">
+          <StatCard label={t('monitoring.metrics.observations.total')} value={observationStats.total} tone="primary"
+            hint={t('monitoring.metrics.observations.totalHint', { count: observationStats.compliant })} />
+          <StatCard label={t('monitoring.metrics.observations.clarification')} value={observationStats.clarification} tone="warning"
+            hint={t('monitoring.metrics.observations.clarificationHint', { count: observationStats.technical })} />
+          <StatCard label={t('monitoring.metrics.observations.violations')} value={observationStats.violations} tone="danger"
+            hint={t('monitoring.metrics.observations.violationsHint', { signed: observationStats.signed, justified: observationStats.justified })} />
+          <StatCard label={t('monitoring.metrics.observations.unsigned')} value={observationStats.unsigned}
+            hint={t('monitoring.metrics.observations.unsignedHint')} />
+        </section>
+      ) : tab === 'archive' ? (
+        <ArchiveStats items={archiveItems} />
+      ) : null}
 
       {tab === 'violations' ? (
+        <>
+        {signError && <Alert tone="danger" onClose={() => setSignError('')} closeLabel={t('ui.close')}>{signError}</Alert>}
         <ViolationsReview
           items={paginatedItems}
           role={role}
-          onReview={handleReview}
-          onUploadAct={handleUploadAct}
-          uploadingActId={uploadingActId}
+          currentUser={currentUser}
+          onReport={openReport}
+          onSign={signItem}
+          signingId={signingId}
+          onJustify={(item) => { setJustifyComment(''); setJustifyTarget(item) }}
           loading={violationsLoading}
           error={violationsError}
           onRetry={loadViolations}
         />
-      ) : loading ? (
-        <Card><LoadingBlock label={t('monitoring.loading')} /></Card>
-      ) : error ? (
-        <Alert tone="danger" title={error}
-          action={<Button variant="secondary" size="sm" icon="refresh" onClick={loadRecords}>{t('ui.retry')}</Button>} />
-      ) : filtered.length === 0 ? (
-        <Card>
-          <EmptyState icon="monitor" title={t('monitoring.empty.title')} description={t('monitoring.empty.hint')} />
-        </Card>
-      ) : tab === 'analytics' ? (
-        <div className="flex min-w-0 flex-col gap-4">
-          <Card>
-            <CardHeader title={t('monitoring.analytics.title')} />
-            <CardBody className="flex flex-col gap-4">
-              <p className="max-w-2xl text-xl font-semibold text-fg">
-                {t('monitoring.analytics.summary', { score: avgScore.toFixed(1), attendance: avgAttendance.toFixed(0) })}
-              </p>
-              <div
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={10}
-                aria-valuenow={Number(avgScore.toFixed(1))}
-                aria-label={t('monitoring.analytics.progressLabel', { score: avgScore.toFixed(1) })}
-                className="h-2.5 overflow-hidden rounded-full bg-surface-hover"
-              >
-                <div className="h-full rounded-full bg-chart-1" style={{ width: `${Math.min(100, avgScore * 10)}%` }} />
-              </div>
-            </CardBody>
-          </Card>
-          <Card>
-            <CardHeader title={t('monitoring.analytics.tableTitle')} />
-            <DataTable
-              columns={analyticsColumns}
-              rows={paginatedItems}
-              caption={t('monitoring.analytics.tableTitle')}
-              empty={<EmptyState icon="chart" title={t('monitoring.empty.title')} compact />}
-            />
-          </Card>
-        </div>
-      ) : (
+        </>
+      ) : tab === 'live' ? (
         <section className="flex min-w-0 flex-col gap-4">
-          <div className="flex min-w-0 flex-wrap items-end justify-between gap-x-4 gap-y-2">
-            <div className="min-w-0">
-              <h2 className="text-lg font-semibold text-fg">{listTitle}</h2>
+          <div className="flex min-w-0 flex-wrap items-end justify-between gap-x-4 gap-y-3">
+            <div className="min-w-0 flex-1 basis-64">
+              <h2 className="text-lg font-semibold text-fg">{t('monitoring.schedule.title')}</h2>
               <p className="text-sm text-fg-muted">
-                {new Date(`${date}T00:00:00`).toLocaleDateString(dateLocale(i18n.language), { day: 'numeric', month: 'long', year: 'numeric' })}
+                {new Date(`${date}T00:00:00`).toLocaleDateString(regionLocale(i18n.language), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                {schedule?.week ? ` · ${t('monitoring.schedule.info', { week: schedule.week, term: schedule.term, year: schedule.study_year, next: schedule.study_year + 1 })}` : ''}
+              </p>
+              <p className="mt-0.5 text-xs text-fg-subtle">
+                {schedule?.synced_at
+                  ? t('monitoring.schedule.synced', { time: new Date(`${schedule.synced_at}Z`).toLocaleString(regionLocale(i18n.language), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) })
+                  : t('monitoring.schedule.notSynced')}
               </p>
             </div>
-            <Badge tone="primary">{t('monitoring.list.count', { count: filtered.length })}</Badge>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <Badge tone="primary">{t('monitoring.schedule.count', { count: liveLessons.length })}</Badge>
+              {isAdmin(role) && (
+                <Button variant="secondary" size="sm" icon="refresh" loading={syncingSchedule} disabled={syncingSchedule} onClick={syncSchedule}>
+                  {syncingSchedule ? t('monitoring.schedule.syncing') : t('monitoring.schedule.sync')}
+                </Button>
+              )}
+            </div>
           </div>
-          <div className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {paginatedItems.map((record) => <LessonCard key={record.id} record={record} onOpen={openViolation} />)}
+
+          <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-3">
+            {isToday && (
+              <SegmentedControl
+                ariaLabel={t('monitoring.schedule.modeLabel')}
+                className="sm:[&_span]:whitespace-nowrap"
+                value={liveMode}
+                onChange={setLiveMode}
+                options={[
+                  { value: 'now', label: t('monitoring.schedule.now'), icon: 'clock' },
+                  { value: 'day', label: t('monitoring.schedule.day'), icon: 'calendar' },
+                ]}
+              />
+            )}
+            <Checkbox label={t('monitoring.schedule.cameraOnly')} checked={cameraOnly} onChange={(e) => setCameraOnly(e.target.checked)} />
           </div>
+
+          {scheduleError && (
+            <Alert tone="danger" title={scheduleError}
+              action={<Button variant="secondary" size="sm" icon="refresh" onClick={() => loadSchedule()}>{t('ui.retry')}</Button>} />
+          )}
+
+          {scheduleLoading && !schedule ? (
+            <Card><LoadingBlock label={t('monitoring.loading')} /></Card>
+          ) : !schedule ? null : !schedule.synced_at ? (
+            <Card><EmptyState icon="calendar" title={t('monitoring.schedule.notSynced')} /></Card>
+          ) : schedule.term == null ? (
+            <Card><EmptyState icon="calendar" title={t('monitoring.empty.title')} description={t('monitoring.schedule.outOfTerm')} /></Card>
+          ) : liveLessons.length === 0 ? (
+            <Card>
+              {effectiveMode === 'now' ? (
+                <EmptyState icon="clock" title={t('monitoring.schedule.emptyNow')} description={t('monitoring.schedule.emptyNowHint')}
+                  action={<Button variant="secondary" icon="calendar" onClick={() => setLiveMode('day')}>{t('monitoring.schedule.day')}</Button>} />
+              ) : (
+                <EmptyState icon="monitor" title={t('monitoring.empty.title')} description={t('monitoring.empty.hint')} />
+              )}
+            </Card>
+          ) : (
+            <div className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {paginatedItems.map((lesson) => <ScheduleLessonCard key={lesson.id} lesson={lesson} onOpen={canReport ? openViolation : undefined} />)}
+            </div>
+          )}
         </section>
+      ) : tab === 'archive' ? (
+        <ArchiveTable rows={paginatedItems} total={archiveItems.length} loading={violationsLoading}
+          error={violationsError} onRetry={loadViolations} />
+      ) : (
+        <ObservationsAnalytics items={periodViolations} loading={violationsLoading} error={violationsError} onRetry={loadViolations} />
       )}
 
-      {!loading && !error && paginationItems.length > 0 && (
+      {(tab === 'live' ? !scheduleLoading : !violationsLoading) && paginationItems.length > 0 && (
         <Pagination
           page={safePage}
           pageCount={pageCount}
@@ -703,22 +877,23 @@ export default function MonitoringPage() {
         />
       )}
 
-      {/* Фиксация нарушения */}
+      {/* Чек-лист ситуационного видеомониторинга (форма 16-02) */}
       <Modal
         open={!!selectedLesson}
         onClose={() => setSelectedLesson(null)}
         size="xl"
-        title={t('monitoring.form.title')}
-        description={selectedLesson ? t('monitoring.form.description', {
+        title={t('checklist.title')}
+        description={selectedLesson ? `${t('checklist.code')} · ${t('monitoring.form.description', {
           teacher: selectedLesson.teacher,
           subject: selectedLesson.subject || '—',
           room: selectedLesson.room || '—',
-        }) : undefined}
+        })}` : undefined}
         footer={(
           <>
             <Button variant="secondary" onClick={() => setSelectedLesson(null)}>{t('ui.cancel')}</Button>
-            <Button type="submit" form="violation-form" icon="check" loading={savingViolation}>
-              {savingViolation ? t('monitoring.form.saving') : t('monitoring.form.submit')}
+            <Button variant="secondary" disabled={savingViolation} onClick={() => saveViolation(null, false)}>{t('checklist.saveDraft')}</Button>
+            <Button type="submit" form="violation-form" icon="key" loading={savingViolation}>
+              {savingViolation ? t('checklist.saving') : t(SENT_TO_TEACHER.includes(effectiveOutcome) ? 'checklist.signAndSend' : 'checklist.sign')}
             </Button>
           </>
         )}
@@ -726,44 +901,67 @@ export default function MonitoringPage() {
         {selectedLesson && (
           <form id="violation-form" onSubmit={saveViolation} className="flex min-w-0 flex-col gap-5">
             {violationNotice && (
-              <Alert tone={violationNotice.tone} onClose={() => setViolationNotice(null)} closeLabel={t('ui.close')}>
-                {violationNotice.text}
-              </Alert>
+              <div ref={noticeRef}>
+                <Alert tone={violationNotice.tone} onClose={() => setViolationNotice(null)} closeLabel={t('ui.close')}>
+                  {violationNotice.text}
+                </Alert>
+              </div>
             )}
 
             <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-              <div className="flex min-w-0 flex-col gap-5">
-                <fieldset className="min-w-0">
-                  <legend className="mb-2 text-sm font-medium text-fg">{t('monitoring.form.type')}</legend>
-                  <div role="radiogroup" className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
-                    {VIOLATION_TYPES.map((type) => {
-                      const checked = violationType === type.value
-                      return (
-                        <label key={type.value}
-                          className={cn(
-                            'flex min-h-11 min-w-0 cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2.5 text-sm transition-colors',
-                            'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus',
-                            checked
-                              ? 'border-primary bg-primary-subtle font-medium text-primary-subtle-fg'
-                              : 'border-line bg-surface text-fg hover:bg-surface-hover',
-                          )}>
-                          <input type="radio" name="violation-type" value={type.value} checked={checked}
-                            onChange={() => setViolationType(type.value)}
-                            className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-[rgb(var(--primary))] focus-visible:outline-none" />
-                          <span className="min-w-0 break-words">{t(`monitoring.types.${type.key}`)}</span>
-                        </label>
-                      )
-                    })}
-                  </div>
-                </fieldset>
+              <div className="flex min-w-0 flex-col gap-6">
+                <Alert tone="info">{t('checklist.rules')}</Alert>
 
-                <Field label={t('monitoring.form.date')} required className="sm:max-w-xs">
-                  <Input type="date" value={violationDate} onChange={(e) => setViolationDate(e.target.value)} />
-                </Field>
+                <section className="flex min-w-0 flex-col gap-3">
+                  <h3 className="text-sm font-semibold text-fg">{t('checklist.card.title')}</h3>
+                  <DescriptionList items={[
+                    { label: t('checklist.card.teacher'), value: selectedLesson.teacher || '—' },
+                    { label: t('checklist.card.observer'), value: currentUser || '—' },
+                    { label: t('checklist.card.room'), value: lessonPlace(selectedLesson) || '—' },
+                    { label: t('checklist.card.camera'), value: selectedCameraRoom?.name || t('checklist.card.noCamera') },
+                    { label: t('checklist.card.schedule'), value: <span className="tabular">{lessonTime(selectedLesson) || '—'}</span> },
+                    {
+                      label: t('checklist.card.subject'),
+                      value: [selectedLesson.subject, selectedLesson.student_groups || selectedLesson.study_group || selectedLesson.group_name]
+                        .filter(Boolean).join(' · ') || '—',
+                    },
+                  ]} />
+                  <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-3">
+                    <Field label={t('checklist.card.date')} required>
+                      <Input type="date" value={violationDate} onChange={(e) => setViolationDate(e.target.value)} />
+                    </Field>
+                    <Field label={t('checklist.card.from')}>
+                      <Input type="time" value={observedFrom} onChange={(e) => setObservedFrom(e.target.value)} />
+                    </Field>
+                    <Field label={t('checklist.card.to')}>
+                      <Input type="time" value={observedTo} onChange={(e) => setObservedTo(e.target.value)} />
+                    </Field>
+                  </div>
+                  <p className="text-xs text-fg-subtle">{t('checklist.card.window')}: {t('checklist.card.windowHint')}</p>
+                </section>
+
+                <section className="flex min-w-0 flex-col gap-3">
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-semibold text-fg">{t('checklist.questionsTitle')}</h3>
+                    <p className="mt-0.5 text-xs text-fg-subtle">{t('checklist.answersHint')}</p>
+                  </div>
+                  <ChecklistQuestions answers={answers} invalid={answersInvalid}
+                    onChange={(next) => { setAnswers(next); setAnswersInvalid(false) }} />
+                </section>
+
+                <section className="flex min-w-0 flex-col gap-4">
+                  <h3 className="text-sm font-semibold text-fg">{t('checklist.report.title')}</h3>
+                  <RadioGroup legend={t('checklist.report.status')} required columns={1} value={effectiveOutcome} onChange={setOutcome}
+                    options={outcomeOptions.map((value) => ({
+                      value, label: t(`checklist.outcomes.${value}`), description: t(`checklist.outcomeHints.${value}`),
+                    }))} />
+                  <Alert tone="warning">{t('checklist.firstObservation')}</Alert>
+                  <ReportFields value={newReport} onChange={setNewReport} />
+                </section>
 
                 <div className="flex min-w-0 flex-col gap-2">
-                  <Field label={t('monitoring.form.situation')}>
-                    <Textarea rows={5} placeholder={t('monitoring.form.situationPlaceholder')}
+                  <Field label={t('checklist.report.comment')} required={answers.other === 'yes'}>
+                    <Textarea rows={4} placeholder={t('checklist.report.commentPlaceholder')}
                       value={violationDescription} onChange={(e) => setViolationDescription(e.target.value)} />
                   </Field>
                   <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2">
@@ -776,7 +974,8 @@ export default function MonitoringPage() {
                 </div>
               </div>
 
-              <div className="flex min-w-0 flex-col gap-4">
+              {/* Камера остаётся на виду, пока заполняется чек-лист */}
+              <div className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-0 lg:self-start">
                 <div className="flex min-w-0 flex-col gap-2">
                   <p className="text-sm font-medium text-fg">{t('monitoring.form.camera')}</p>
                   {selectedCameraRoom ? (
@@ -836,8 +1035,10 @@ export default function MonitoringPage() {
                           {item.media_type === 'photo'
                             ? <img src={item.url} alt={t('monitoring.form.snapshotAlt')} className="aspect-video w-full object-cover" />
                             : (
-                              <span className={cn('grid aspect-video w-full place-items-center text-fg-inverse', MEDIA_BG)}>
-                                <Icon name="video" size={20} />
+                              // Первый кадр записи (запись начинается с опорного кадра) и значок поверх
+                              <span className={cn('relative block aspect-video w-full overflow-hidden', MEDIA_BG)}>
+                                <video muted preload="metadata" className="h-full w-full object-cover"><source src={`${item.url}#t=0.1`} type="video/mp4" /></video>
+                                <span className="absolute inset-0 grid place-items-center text-fg-inverse"><Icon name="video" size={20} /></span>
                               </span>
                             )}
                           <span className="min-w-0 px-2 py-1.5 text-xs font-medium text-fg-muted">
@@ -849,31 +1050,65 @@ export default function MonitoringPage() {
                   </div>
                 )}
 
-                <Alert tone="info">{t('monitoring.form.prefilled')}</Alert>
               </div>
             </div>
           </form>
         )}
       </Modal>
 
-      {/* Подтверждение/отклонение нарушения с необязательным комментарием */}
+      {/* Отчетность по наблюдению: сверка, повторное наблюдение, очная верификация, итог (п. 4.5) */}
       <Modal
-        open={!!reviewTarget}
-        onClose={() => setReviewTarget(null)}
-        size="sm"
-        title={reviewConfirming ? t('monitoring.review.confirmTitle') : t('monitoring.review.rejectTitle')}
+        open={!!reportTarget}
+        onClose={() => setReportTarget(null)}
+        size="lg"
+        title={reportTarget ? t('checklist.reportTitle', { id: reportTarget.id }) : ''}
+        description={reportTarget?.teacher}
         footer={(
           <>
-            <Button variant="secondary" onClick={() => setReviewTarget(null)}>{t('ui.cancel')}</Button>
-            <Button type="submit" form="violation-review-form" variant={reviewConfirming ? 'success' : 'danger'} loading={reviewing}>
-              {reviewConfirming ? t('monitoring.review.confirm') : t('monitoring.review.reject')}
+            <Button variant="secondary" onClick={() => setReportTarget(null)}>{t('ui.cancel')}</Button>
+            <Button type="submit" form="violation-report-form" icon="check" loading={reporting}>{t('checklist.saveReport')}</Button>
+          </>
+        )}
+      >
+        {reportTarget && (
+          <form id="violation-report-form" onSubmit={submitReport} className="flex min-w-0 flex-col gap-5">
+            {reportError && (
+              <div ref={noticeRef}>
+                <Alert tone="danger" onClose={() => setReportError('')} closeLabel={t('ui.close')}>{reportError}</Alert>
+              </div>
+            )}
+            <Alert tone="info">{t('checklist.firstObservation')}</Alert>
+            <ReportFields value={report} onChange={setReport} />
+            <RadioGroup legend={t('checklist.report.status')} required columns={2} value={reportStatus} onChange={setReportStatus}
+              options={REPORT_OUTCOMES.map((value) => ({
+                value, label: t(`checklist.outcomes.${value}`), description: t(`checklist.outcomeHints.${value}`),
+              }))} />
+            <Field label={t('checklist.reviewComment')}>
+              <Textarea rows={3} value={reportComment} onChange={(e) => setReportComment(e.target.value)} />
+            </Field>
+          </form>
+        )}
+      </Modal>
+
+      {/* Снять нарушение по пояснению преподавателя */}
+      <Modal
+        open={!!justifyTarget}
+        onClose={() => setJustifyTarget(null)}
+        size="sm"
+        title={justifyTarget ? t('checklist.justifyTitle', { id: justifyTarget.id }) : ''}
+        description={justifyTarget?.teacher}
+        footer={(
+          <>
+            <Button variant="secondary" onClick={() => setJustifyTarget(null)}>{t('ui.cancel')}</Button>
+            <Button type="submit" form="violation-justify-form" icon="check" loading={justifying} disabled={justifyComment.trim().length < 3}>
+              {t('checklist.justify')}
             </Button>
           </>
         )}
       >
-        <form id="violation-review-form" onSubmit={submitReview}>
-          <Field label={reviewConfirming ? t('monitoring.review.confirmComment') : t('monitoring.review.rejectComment')}>
-            <Textarea rows={3} value={reviewComment} onChange={(e) => setReviewComment(e.target.value)} data-autofocus />
+        <form id="violation-justify-form" onSubmit={submitJustify}>
+          <Field label={t('checklist.justifyComment')} required>
+            <Textarea rows={3} value={justifyComment} onChange={(e) => setJustifyComment(e.target.value)} data-autofocus />
           </Field>
         </form>
       </Modal>

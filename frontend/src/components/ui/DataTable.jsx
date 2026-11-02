@@ -1,5 +1,6 @@
 import { cn } from './cn'
 import { EmptyState, Skeleton } from './Feedback'
+import { useMediaQuery, usePrinting } from './useMediaQuery'
 
 const ALIGN = { left: 'text-left', right: 'text-right', center: 'text-center' }
 
@@ -9,6 +10,8 @@ const ALIGN = { left: 'text-left', right: 'text-right', center: 'text-center' }
  *             nowrap?, mobile?: 'title' | 'hidden' | 'full' }]
  * — ≥ md: таблица в собственном контейнере с горизонтальным скроллом, липкая шапка, первая колонка закреплена.
  * — < md: каждая строка — карточка: колонка с mobile:'title' (или первая) — заголовок, остальные — «подпись: значение».
+ * Отрисовывается только видимый вариант (раньше оба, и каждая ячейка считалась дважды); при печати — оба,
+ * выбор между ними по ширине страницы делает CSS.
  */
 export default function DataTable({
   columns, rows, rowKey = 'id', onRowClick, loading = false, skeletonRows = 5, empty, caption,
@@ -19,6 +22,10 @@ export default function DataTable({
   const titleCol = columns.find((c) => c.mobile === 'title') || columns[0]
   const isEmpty = !loading && (!rows || rows.length === 0)
   const clickable = !!onRowClick
+  const desktop = useMediaQuery('(min-width: 768px)')
+  const printing = usePrinting()
+  const showTable = !mobileCards || desktop || printing
+  const showCards = mobileCards && (!desktop || printing)
   const onKey = (e, row) => {
     if (clickable && (e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
       e.preventDefault()
@@ -29,59 +36,61 @@ export default function DataTable({
   return (
     <div className={cn('min-w-0', className)}>
       {/* Таблица */}
-      <div className={cn('scrollbar-thin min-w-0 overflow-auto', mobileCards && 'hidden md:block')} style={maxHeight ? { maxHeight } : undefined}>
-        <table className="w-full border-separate border-spacing-0 text-sm">
-          {caption && <caption className="sr-only">{caption}</caption>}
-          <thead>
-            <tr>
-              {columns.map((col, ci) => (
-                <th key={col.key} scope="col" style={col.minWidth ? { minWidth: col.minWidth } : undefined} {...col.headerProps}
-                  className={cn(
-                    'sticky top-0 z-sticky border-b border-line bg-surface-muted px-4 py-2.5 text-xs font-semibold text-fg-muted',
-                    ALIGN[col.align || 'left'],
-                    ci === 0 && stickyFirst && 'left-0 z-[calc(var(--z-sticky)_+_1)]',
-                    col.headerClassName,
-                  )}>
-                  {col.header}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {loading && Array.from({ length: skeletonRows }, (_, r) => (
-              <tr key={`s${r}`}>
-                {columns.map((col) => (
-                  <td key={col.key} className="border-b border-line px-4 py-3"><Skeleton className="h-4 w-3/4" /></td>
-                ))}
-              </tr>
-            ))}
-            {!loading && rows?.map((row, i) => (
-              <tr key={keyOf(row, i)}
-                onClick={clickable ? () => onRowClick(row) : undefined}
-                onKeyDown={clickable ? (e) => onKey(e, row) : undefined}
-                tabIndex={clickable ? 0 : undefined}
-                className={cn('group', clickable && 'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus', rowClassName?.(row))}>
+      {showTable && (
+        <div className={cn('scrollbar-thin min-w-0 overflow-auto', mobileCards && 'hidden md:block')} style={maxHeight ? { maxHeight } : undefined}>
+          <table className="w-full border-separate border-spacing-0 text-sm">
+            {caption && <caption className="sr-only">{caption}</caption>}
+            <thead>
+              <tr>
                 {columns.map((col, ci) => (
-                  <td key={col.key} style={col.minWidth ? { minWidth: col.minWidth } : undefined}
+                  <th key={col.key} scope="col" style={col.minWidth ? { minWidth: col.minWidth } : undefined} {...col.headerProps}
                     className={cn(
-                      'border-b border-line bg-surface px-4 py-3 align-middle text-fg transition-colors group-hover:bg-surface-hover',
+                      'sticky top-0 z-sticky border-b border-line bg-surface-muted px-4 py-2.5 text-xs font-semibold text-fg-muted',
                       ALIGN[col.align || 'left'],
-                      col.nowrap && 'whitespace-nowrap',
-                      ci === 0 && stickyFirst && 'sticky left-0 z-sticky',
-                      col.className,
+                      ci === 0 && stickyFirst && 'left-0 z-[calc(var(--z-sticky)_+_1)]',
+                      col.headerClassName,
                     )}>
-                    {render(col, row, i)}
-                  </td>
+                    {col.header}
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-        {isEmpty && (empty ?? <EmptyState compact />)}
-      </div>
+            </thead>
+            <tbody>
+              {loading && Array.from({ length: skeletonRows }, (_, r) => (
+                <tr key={`s${r}`}>
+                  {columns.map((col) => (
+                    <td key={col.key} className="border-b border-line px-4 py-3"><Skeleton className="h-4 w-3/4" /></td>
+                  ))}
+                </tr>
+              ))}
+              {!loading && rows?.map((row, i) => (
+                <tr key={keyOf(row, i)}
+                  onClick={clickable ? () => onRowClick(row) : undefined}
+                  onKeyDown={clickable ? (e) => onKey(e, row) : undefined}
+                  tabIndex={clickable ? 0 : undefined}
+                  className={cn('group', clickable && 'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus', rowClassName?.(row))}>
+                  {columns.map((col, ci) => (
+                    <td key={col.key} style={col.minWidth ? { minWidth: col.minWidth } : undefined}
+                      className={cn(
+                        'border-b border-line bg-surface px-4 py-3 align-middle text-fg transition-colors group-hover:bg-surface-hover',
+                        ALIGN[col.align || 'left'],
+                        col.nowrap && 'whitespace-nowrap',
+                        ci === 0 && stickyFirst && 'sticky left-0 z-sticky',
+                        col.className,
+                      )}>
+                      {render(col, row, i)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {isEmpty && (empty ?? <EmptyState compact />)}
+        </div>
+      )}
 
       {/* Карточки на мобильном */}
-      {mobileCards && (
+      {showCards && (
         <div className="md:hidden">
           {loading && Array.from({ length: 3 }, (_, r) => (
             <div key={r} className="space-y-2 border-b border-line p-4"><Skeleton className="h-4 w-1/2" /><Skeleton className="h-3 w-3/4" /></div>

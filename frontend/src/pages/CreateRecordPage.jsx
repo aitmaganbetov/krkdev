@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { apiErrorText, createRecord, getAcademicYears, getBasicInfoCatalog } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import StepIndicator from '../components/StepIndicator'
@@ -13,6 +13,8 @@ import { formErrorText } from '../locales/recordForm'
 import { getRecordFormError, getRecordFormStepError } from '../utils/recordForm'
 import { findTemplate, normalizeRatings, useRatingTemplates } from '../utils/ratingTemplate'
 import { datetimeLocalToIsoUtcPlus5 } from '../utils/datetime'
+import { recordFromLesson } from '../utils/scheduleLesson'
+import { deanFaculties } from '../utils/roles'
 
 function createInitial() {
   return {
@@ -27,9 +29,11 @@ function createInitial() {
 export default function CreateRecordPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { currentUser } = useAuth()
+  // Занятие со страницы «Расписание»: форма открывается заполненной по нему
+  const lesson = useLocation().state?.lesson
+  const { currentUser, role, facultyId } = useAuth()
   const [step, setStep]     = useState(0)
-  const [data, setData]     = useState(() => createInitial())
+  const [data, setData]     = useState(() => ({ ...createInitial(), ...(lesson ? recordFromLesson(lesson) : {}) }))
   const [catalog, setCatalog] = useState({ faculties: [], academic_years: [] })
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [catalogError, setCatalogError] = useState('')
@@ -68,7 +72,8 @@ export default function CreateRecordPage() {
   useEffect(() => {
     getBasicInfoCatalog()
       .then((result) => {
-        setCatalog(result)
+        // Деканат оформляет записи только своего факультета
+        setCatalog({ ...result, faculties: deanFaculties(result.faculties, role, facultyId) })
         setCatalogError('')
       })
       .catch((err) => {
@@ -77,6 +82,13 @@ export default function CreateRecordPage() {
       })
       .finally(() => setCatalogLoading(false))
   }, [])
+
+  // Деканату факультет подставляется сразу: другой выбрать нельзя
+  useEffect(() => {
+    if (catalog.faculties.length === 1 && role === 'dean') {
+      setData((d) => (d.faculty ? d : { ...d, faculty: catalog.faculties[0].name_ru }))
+    }
+  }, [catalog, role])
 
   // При смене шага возвращаем к началу формы
   useEffect(() => {
@@ -140,6 +152,12 @@ export default function CreateRecordPage() {
         description={t('createRecord.subtitle')}
         back={{ to: '/records', label: t('recordForm.backToList') }}
       />
+
+      {lesson && (
+        <Alert tone="info">
+          {t('schedulePage.prefilled', { subject: lesson.subject, date: lesson.date.split('-').reverse().join('.'), time: lesson.start_time })}
+        </Alert>
+      )}
 
       <div ref={stepsRef} className="min-w-0 scroll-mt-20">
         <Card padded>

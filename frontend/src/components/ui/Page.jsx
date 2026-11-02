@@ -58,9 +58,11 @@ export function StatCard({ label, value, hint, icon, tone = 'neutral', footer, c
   return (
     <div className={cn('flex min-w-0 flex-col gap-3 rounded-lg border border-line bg-surface p-4 shadow-1 sm:p-5', className)}>
       <div className="flex min-w-0 items-start justify-between gap-3">
-        <p className="min-w-0 text-sm font-medium text-fg-muted">{label}</p>
+        {/* В узкой карточке слово переносится по слогам, а не рвётся посередине («Заблокиро|вано») */}
+        <p className="min-w-0 hyphens-auto text-sm font-medium text-fg-muted">{label}</p>
         {icon && (
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-surface-muted text-fg-subtle">
+          // Иконка декоративная: на телефоне (две карточки в ряд) место отдаётся подписи
+          <span className="hidden h-9 w-9 shrink-0 place-items-center rounded-md bg-surface-muted text-fg-subtle sm:grid">
             <Icon name={icon} size={18} />
           </span>
         )}

@@ -3,7 +3,7 @@ export default {
   ru: {
     catalogs: {
       title: 'Справочник',
-      description: 'Вопросы оценки занятий и учебные годы.',
+      description: 'Вопросы оценки занятий, учебные годы и структура университета из Platonus.',
       tabs: { label: 'Разделы справочника', questions: 'Вопросы', years: 'Учебные годы' },
     },
     years: {
@@ -43,7 +43,7 @@ export default {
   kz: {
     catalogs: {
       title: 'Анықтамалық',
-      description: 'Сабақты бағалау сұрақтары және оқу жылдары.',
+      description: 'Сабақты бағалау сұрақтары, оқу жылдары және Platonus-тағы университет құрылымы.',
       tabs: { label: 'Анықтамалық бөлімдері', questions: 'Сұрақтар', years: 'Оқу жылдары' },
     },
     years: {
@@ -83,7 +83,7 @@ export default {
   en: {
     catalogs: {
       title: 'Catalogs',
-      description: 'Lesson evaluation questions and academic years.',
+      description: 'Lesson evaluation questions, academic years and the university structure from Platonus.',
       tabs: { label: 'Catalog sections', questions: 'Questions', years: 'Academic years' },
     },
     years: {

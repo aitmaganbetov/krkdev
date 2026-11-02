@@ -10,6 +10,7 @@ import {
 } from '../components/ui'
 import { formatDateTimeUtcPlus5, formatDateUtcPlus5 } from '../utils/datetime'
 import { applicableSections, findTemplate, loadRatingTemplates, localized, templateMaxScore } from '../utils/ratingTemplate'
+import { deanFaculties, managesWorkspace } from '../utils/roles'
 
 const DEFAULT_PAGE_SIZE = 20
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
@@ -157,11 +158,11 @@ const STATUS_FILTER_VALUES = ['draft', 'submitted', 'rework', 'accepted']
 
 export default function RecordsPage() {
   const navigate = useNavigate()
-  const { role } = useAuth()
+  const { role, facultyId } = useAuth()
   const { t } = useTranslation()
   const { toast, confirm } = useUI()
-  const canManageRecords = role === 'admin'
-  const canExportRecords = role === 'admin' || role === 'inspector'
+  const canManageRecords = managesWorkspace(role)
+  const canExportRecords = managesWorkspace(role) || role === 'inspector'
 
   const [items, setItems] = useState([])
   const [total, setTotal] = useState(0)
@@ -192,7 +193,7 @@ export default function RecordsPage() {
     getBasicInfoCatalog()
       .then((r) => {
         setAcademicYears(r.academic_years ?? [])
-        const catalogFaculties = r.faculties ?? []
+        const catalogFaculties = deanFaculties(r.faculties, role, facultyId)
         const facultyNames = catalogFaculties
           .map((faculty) => faculty?.name_ru)
           .filter(Boolean)

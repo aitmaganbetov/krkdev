@@ -13,6 +13,7 @@ import { formErrorText } from '../locales/recordForm'
 import { getRecordFormError, getRecordFormStepError } from '../utils/recordForm'
 import { findTemplate, normalizeRatings, useRatingTemplates } from '../utils/ratingTemplate'
 import { datetimeLocalToIsoUtcPlus5, toDatetimeLocalUtcPlus5 } from '../utils/datetime'
+import { deanFaculties } from '../utils/roles'
 
 const EDITABLE_FIELDS = [
   'teacher',
@@ -36,7 +37,7 @@ export default function EditRecordPage() {
   const { t } = useTranslation()
   const { id } = useParams()
   const navigate = useNavigate()
-  const { currentUser } = useAuth()
+  const { currentUser, role, facultyId } = useAuth()
 
   const [step, setStep]     = useState(0)
   const [data, setData]     = useState(null)
@@ -78,7 +79,8 @@ export default function EditRecordPage() {
   useEffect(() => {
     getBasicInfoCatalog()
       .then((result) => {
-        setCatalog(result)
+        // Деканат оформляет записи только своего факультета
+        setCatalog({ ...result, faculties: deanFaculties(result.faculties, role, facultyId) })
         setCatalogError('')
       })
       .catch((err) => {

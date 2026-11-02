@@ -54,8 +54,11 @@ export function UIProvider({ children }) {
     setDialog(null)
   }
 
+  // Стабильное значение контекста: всплывающие сообщения не перерисовывают всех потребителей useUI()
+  const value = useMemo(() => ({ toast, confirm }), [toast, confirm])
+
   return (
-    <UIContext.Provider value={{ toast, confirm }}>
+    <UIContext.Provider value={value}>
       {children}
       <Modal
         open={!!dialog}
@@ -85,7 +88,7 @@ export function UIProvider({ children }) {
                 <p className="text-fg-muted">{x.message}</p>
               </div>
               <button type="button" onClick={() => dismiss(x.id)} aria-label={t('ui.close')} title={t('ui.close')}
-                className="-m-1 rounded-md p-1 text-fg-subtle hover:bg-surface-hover hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+                className="-m-2 rounded-md p-2 text-fg-subtle hover:bg-surface-hover hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
                 <Icon name="x" size={16} />
               </button>
             </div>

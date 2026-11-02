@@ -119,7 +119,7 @@ except Exception as e:
     logging.error(f"Failed to prepare indexes: {e}")
 
 app = FastAPI(
-    title="Sapa API — система ректорского контроля",
+    title="Sapa Monitoring API",
     version="1.0.0",
     docs_url="/docs" if os.getenv("ENABLE_API_DOCS", "false").strip().lower() in {"1", "true", "yes"} else None,
     redoc_url="/redoc" if os.getenv("ENABLE_API_DOCS", "false").strip().lower() in {"1", "true", "yes"} else None,

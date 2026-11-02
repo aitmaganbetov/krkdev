@@ -23,7 +23,7 @@ export default {
         language: 'Язык интерфейса',
         groups: { overview: 'Обзор', workspace: 'Рабочая область', administration: 'Администрирование' },
         logout: 'Выйти',
-        subtitle: 'Sapa',
+        subtitle: 'Sapa Monitoring',
       },
       // Auth
       auth: {
@@ -283,7 +283,7 @@ export default {
       // Common
       common: {
         error: 'Ошибка',
-        system: 'Sapa · Система ректорского контроля',
+        system: 'Sapa Monitoring · Система ректорского контроля',
         menu: 'Меню',
         skipToContent: 'Перейти к содержимому',
         cancel: 'Отмена',
@@ -318,7 +318,7 @@ export default {
         language: 'Интерфейс тілі',
         groups: { overview: 'Шолу', workspace: 'Жұмыс аймағы', administration: 'Әкімшілендіру' },
         logout: 'Шығу',
-        subtitle: 'Sapa',
+        subtitle: 'Sapa Monitoring',
       },
       auth: {
         title: 'Жүйеге кіру',
@@ -568,7 +568,7 @@ export default {
       },
       common: {
         error: 'Қате',
-        system: 'Sapa · Ректорлық бақылау жүйесі',
+        system: 'Sapa Monitoring · Ректорлық бақылау жүйесі',
         menu: 'Мәзір',
         skipToContent: 'Мазмұнға өту',
         cancel: 'Болдырмау',
@@ -603,7 +603,7 @@ export default {
         language: 'Interface language',
         groups: { overview: 'Overview', workspace: 'Workspace', administration: 'Administration' },
         logout: 'Logout',
-        subtitle: 'Sapa',
+        subtitle: 'Sapa Monitoring',
       },
       auth: {
         title: 'Sign in',
@@ -851,7 +851,7 @@ export default {
       },
       common: {
         error: 'Error',
-        system: 'Sapa · Rector control system',
+        system: 'Sapa Monitoring · Rector control system',
         menu: 'Menu',
         skipToContent: 'Skip to content',
         cancel: 'Cancel',

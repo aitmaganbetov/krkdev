@@ -61,7 +61,7 @@ export function Brand({ compact = false }) {
   const { t } = useTranslation()
   return (
     <div className="flex min-w-0 items-center gap-3">
-      <SapaMark size={36} title={compact ? 'Sapa' : undefined} />
+      <SapaMark size={36} title={compact ? 'Sapa Monitoring' : undefined} />
       {!compact && (
         <div className="min-w-0">
           <SapaWordmark height={20} className="text-brand-navy dark:text-white" />

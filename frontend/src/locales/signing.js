@@ -28,7 +28,7 @@ export default {
     },
     verify: {
       university: 'Казахский университет технологии и бизнеса им. К. Кулажанова',
-      system: 'Система ректорского контроля · проверка электронного документа',
+      system: 'Sapa Monitoring · проверка электронного документа',
       notFound: 'Документ не найден или ещё не подписан',
       valid: 'Документ подлинный: подписан ЭЦП и не изменялся после подписи.',
       changed: 'Внимание: содержимое документа изменено после подписи — подпись к нему не относится.',
@@ -79,7 +79,7 @@ export default {
     },
     verify: {
       university: 'Қ. Құлажанов атындағы Қазақ технология және бизнес университеті',
-      system: 'Ректорлық бақылау жүйесі · электрондық құжатты тексеру',
+      system: 'Sapa Monitoring · электрондық құжатты тексеру',
       notFound: 'Құжат табылмады немесе әлі қол қойылмаған',
       valid: 'Құжат түпнұсқа: ЭЦҚ-мен қол қойылған және қол қойылғаннан кейін өзгертілмеген.',
       changed: 'Назар аударыңыз: құжат мазмұны қол қойылғаннан кейін өзгертілген — қолтаңба оған қатысты емес.',
@@ -130,7 +130,7 @@ export default {
     },
     verify: {
       university: 'K. Kulazhanov Kazakh University of Technology and Business',
-      system: 'Rector’s control system · electronic document verification',
+      system: 'Sapa Monitoring · electronic document verification',
       notFound: 'Document not found or not signed yet',
       valid: 'The document is authentic: digitally signed and unchanged since signing.',
       changed: 'Warning: the document content changed after signing — the signature does not cover it.',

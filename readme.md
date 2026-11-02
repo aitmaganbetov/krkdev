@@ -149,11 +149,15 @@ DATABASE_URL=mysql+pymysql://<db_user>:<db_password>@host.docker.internal:6080/<
 
 ## Полезные команды
 
-Заполнить тестовыми данными:
+Демо-данные по всем ролям (только dev, `DEV_QUICK_LOGIN=true`; быстрый вход создаёт их сам при первом входе):
 
 ```bash
-docker compose exec backend python seed.py
+docker compose -f docker-compose.dev.yml exec backend python seed.py           # создать, если ещё нет
+docker compose -f docker-compose.dev.yml exec backend python seed.py --reset   # пересоздать
+docker compose -f docker-compose.dev.yml exec backend python seed.py --clear   # удалить только демо-данные
 ```
+
+Преподаватель, пользователь, член комитета КРК и студент входят как настоящие люди из Platonus (без своей учётной записи КРК), остальные роли — служебные `dev.<роль>`. Демо-подписи помечены «DEV · демо-подпись (без ЭЦП)». Подробности — `backend/services/dev_seed.py`.
 
 Проверить состояние API:
 
